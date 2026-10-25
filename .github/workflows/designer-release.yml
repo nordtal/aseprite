@@ -1,7 +1,15 @@
 name: designer-release
+# A tag builds both packages for its release. A manual run builds the
+# chosen platforms from any branch and keeps the packages as artifacts.
 on:
   push:
     tags: ['v*-designer.*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        options: [all, macos, windows]
+        default: all
 permissions:
   contents: write
 jobs:
@@ -9,13 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        platform: ${{ fromJSON((inputs.platform == '' || inputs.platform == 'all') && '["macos","windows"]' || format('["{0}"]', inputs.platform)) }}
         include:
-        - os: macos-latest
-          platform: macos
+        - platform: macos
+          os: macos-latest
           arch: arm64
           package: Nordtal-Designer-macOS-arm64.zip
-        - os: windows-latest
-          platform: windows
+        - platform: windows
+          os: windows-latest
           arch: x64
           package: Nordtal-Designer-Windows-x64.zip
     runs-on: ${{ matrix.os }}
@@ -33,7 +42,7 @@ jobs:
         skia_url=$(bash laf/misc/skia-url.sh release ${{ matrix.platform }} ${{ matrix.arch }} | xargs)
         curl --ssl-revoke-best-effort -L -o skia.zip "$skia_url"
         unzip -q skia.zip -d skia
-    - uses: aseprite/get-ninja@main
+    - uses: aseprite/get-ninja@27788a2a3a1d6106713702d6741e4ee95f3cc10a # main
     - uses: TheMrMilchmann/setup-msvc-dev@v4
       if: runner.os == 'Windows'
       with:
@@ -60,7 +69,13 @@ jobs:
           cp -r build/bin/data "package/Nordtal Designer/"
           cd package && 7z a "../${{ matrix.package }}" "Nordtal Designer"
         fi
+    - uses: actions/upload-artifact@v7
+      if: github.event_name == 'workflow_dispatch'
+      with:
+        name: ${{ matrix.package }}
+        path: ${{ matrix.package }}
     - name: Attach to the release
+      if: github.event_name == 'push'
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
