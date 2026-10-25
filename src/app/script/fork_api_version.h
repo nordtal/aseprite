@@ -14,6 +14,7 @@
 //
 // 1: Process, app.fs.chooseFolder(), Dialog:tree{} and Dialog:modifyNode{}
 // 2: Dialog{ tab=true, closable } and Dialog:editor{ sprite, onchange }
-#define FORK_API_VERSION 2
+// 3: Process{ env }
+#define FORK_API_VERSION 3
 
 #endif

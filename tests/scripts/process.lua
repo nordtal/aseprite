@@ -82,6 +82,34 @@ do
   p:stop(true)
 end
 
+-- env sets variables for the program, and false removes one. The
+-- rest of the app's environment reaches it as it is.
+if app.forkApiVersion >= 3 then
+  local home = os.getenv("HOME")
+  local out, err, code = run{ cmd={ "sh", "-c", 'printf "%s|%s|%s\\n" "$NT_A" "${HOME-unset}" "$PATH"' },
+                              env={ NT_A="a b=c", HOME=false } }
+  assert(code == 0)
+  assert(out[1] == "a b=c|unset|" .. os.getenv("PATH"))
+  assert(os.getenv("HOME") == home)
+
+  -- PATH from env is where the program is looked up
+  local dir = app.fs.joinPath(app.fs.tempPath, "process-env-test")
+  app.fs.makeAllDirectories(dir)
+  local f = io.open(app.fs.joinPath(dir, "nt-env-probe"), "w")
+  f:write("#!/bin/sh\necho found\n")
+  f:close()
+  os.execute("chmod +x '" .. app.fs.joinPath(dir, "nt-env-probe") .. "'")
+  out, err, code = run{ cmd={ "nt-env-probe" }, env={ PATH=dir .. ":" .. os.getenv("PATH") } }
+  assert(code == 0)
+  assert(out[1] == "found")
+
+  -- Only strings and false are values
+  assert(not pcall(function() Process{ cmd={ "true" }, env={ A=1 } } end))
+  assert(not pcall(function() Process{ cmd={ "true" }, env={ [1]="x" } } end))
+  assert(not pcall(function() Process{ cmd={ "true" }, env={ ["A=B"]="x" } } end))
+end
+assert(app.forkApiVersion >= 3)
+
 -- The working directory
 do
   local dir = app.fs.joinPath(app.fs.tempPath, "process-cwd-test")
