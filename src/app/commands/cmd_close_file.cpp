@@ -16,6 +16,8 @@
 #include "app/ui/workspace.h"
 #include "app/ui_context.h"
 
+#include <algorithm>
+
 namespace app {
 
 using namespace ui;
@@ -63,14 +65,22 @@ protected:
       return;
 
     // Collect all document views
-    DocViews docViews;
-    for (auto view : *workspace) {
-      DocView* docView = view->docView();
-      if (docView)
-        docViews.push_back(docView);
-    }
+    auto collect = [workspace] {
+      DocViews docViews;
+      for (auto view : *workspace) {
+        DocView* docView = view->docView();
+        if (docView)
+          docViews.push_back(docView);
+      }
+      return docViews;
+    };
 
-    for (auto docView : docViews) {
+    // Closing a view can run scripts that delete other views (a
+    // script tab that embeds a sprite), so each one is looked up again
+    for (auto docView : collect()) {
+      const DocViews current = collect();
+      if (std::find(current.begin(), current.end(), docView) == current.end())
+        continue;
       if (!workspace->closeView(docView, m_quitting))
         break;
     }
