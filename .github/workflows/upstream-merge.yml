@@ -1,0 +1,36 @@
+name: upstream-merge
+# Once a week, a pull request merges a new Aseprite release.
+#
+# It needs the secret UPSTREAM_TOKEN, a fine-grained token for this
+# repository with write access to contents, pull requests and
+# workflows, and read access to actions. The workflow's own token can't
+# push upstream's workflow changes, and a pull request it opens
+# wouldn't start designer-ci.
+on:
+  schedule:
+  - cron: '0 6 * * 1'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Check the token
+      env:
+        UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
+      run: |
+        if [ -z "$UPSTREAM_TOKEN" ] ; then
+          echo "::error::The secret UPSTREAM_TOKEN is missing"
+          exit 1
+        fi
+    - uses: actions/checkout@v7
+      with:
+        ref: main
+        fetch-depth: 0
+        token: ${{ secrets.UPSTREAM_TOKEN }}
+    - name: Open the pull request
+      env:
+        GH_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
+        GH_REPO: ${{ github.repository }}
+      run: bash .github/upstream-merge.sh
