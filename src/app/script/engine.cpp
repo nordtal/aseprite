@@ -189,6 +189,7 @@ void register_palette_class(lua_State* L);
 void register_palettes_class(lua_State* L);
 void register_plugin_class(lua_State* L);
 void register_point_class(lua_State* L);
+void register_process_class(lua_State* L);
 void register_properties_class(lua_State* L);
 void register_range_class(lua_State* L);
 void register_rect_class(lua_State* L);
@@ -505,6 +506,7 @@ Engine::Engine() : L(luaL_newstate()), m_delegate(nullptr), m_printLastResult(fa
   register_palettes_class(L);
   register_plugin_class(L);
   register_point_class(L);
+  register_process_class(L);
   register_properties_class(L);
   register_range_class(L);
   register_rect_class(L);

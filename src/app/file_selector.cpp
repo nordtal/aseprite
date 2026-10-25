@@ -26,6 +26,50 @@
 
 namespace app {
 
+// Creates the system's file dialog, or returns null if there is none.
+static dlgs::FileDialogRef make_native_file_dialog()
+{
+  dlgs::FileDialog::Spec spec;
+
+#if LAF_MACOS
+  // Setup the standard "Edit" item for macOS
+  auto* editItem = AppMenuItem::GetStandardEditMenu();
+  if (editItem && editItem->native() && editItem->native()->menuItem) {
+    spec.editNSMenuItem = editItem->native()->menuItem->nativeHandle();
+  }
+#elif LAF_LINUX
+  // Connect laf-os <-> laf-dlgs information about the X11 server
+  // connection.
+  spec.x11display = os::X11::instance()->display();
+#endif
+
+  return dlgs::FileDialog::make(spec);
+}
+
+bool show_folder_selector(const std::string& title,
+                          const std::string& initialPath,
+                          std::string& output)
+{
+  dlgs::FileDialogRef dlg = make_native_file_dialog();
+  if (!dlg)
+    return false;
+
+  dlg->setTitle(title);
+  dlg->setType(dlgs::FileDialog::Type::OpenFolder);
+  // The dialogs start in the folder of the given file name
+  if (!initialPath.empty())
+    dlg->setFileName(base::join_path(initialPath, ""));
+
+  const os::SystemRef system = os::System::instance();
+  auto res = dlg->show(system->defaultWindow()->nativeHandle());
+  system->resetKeyPressed();
+
+  if (res != dlgs::FileDialog::Result::OK)
+    return false;
+  output = dlg->fileName();
+  return !output.empty();
+}
+
 bool show_file_selector(const std::string& title,
                         const std::string& initialPath,
                         const base::paths& extensions,
@@ -36,21 +80,7 @@ bool show_file_selector(const std::string& title,
   const std::string defExtension = Preferences::instance().saveFile.defaultExtension();
 
   if (Preferences::instance().experimental.useNativeFileDialog()) {
-    dlgs::FileDialog::Spec spec;
-
-#if LAF_MACOS
-    // Setup the standard "Edit" item for macOS
-    auto* editItem = AppMenuItem::GetStandardEditMenu();
-    if (editItem && editItem->native() && editItem->native()->menuItem) {
-      spec.editNSMenuItem = editItem->native()->menuItem->nativeHandle();
-    }
-#elif LAF_LINUX
-    // Connect laf-os <-> laf-dlgs information about the X11 server
-    // connection.
-    spec.x11display = os::X11::instance()->display();
-#endif
-
-    dlgs::FileDialogRef dlg = dlgs::FileDialog::make(spec);
+    dlgs::FileDialogRef dlg = make_native_file_dialog();
     if (dlg) {
       dlg->setTitle(title);
 

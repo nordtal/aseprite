@@ -9,6 +9,7 @@
 #endif
 
 #include "app/app.h"
+#include "app/file_selector.h"
 #include "app/resource_finder.h"
 #include "app/script/luacpp.h"
 #include "app/script/security.h"
@@ -183,6 +184,28 @@ int AppFS_removeDirectory(lua_State* L)
   return 1;
 }
 
+// app.fs.chooseFolder{ title, path } shows the system's folder chooser
+// and returns the chosen folder, or nil
+int AppFS_chooseFolder(lua_State* L)
+{
+  std::string title, path;
+  if (lua_istable(L, 1)) {
+    if (lua_getfield(L, 1, "title") == LUA_TSTRING)
+      title = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    if (lua_getfield(L, 1, "path") == LUA_TSTRING)
+      path = lua_tostring(L, -1);
+    lua_pop(L, 1);
+  }
+
+  std::string folder;
+  if (App::instance()->isGui() && show_folder_selector(title, path, folder))
+    lua_pushstring(L, folder.c_str());
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
 const Property AppFS_properties[] = {
   { "pathSeparator",  AppFS_pathSeparator,                               nullptr },
   // Special folder names
@@ -212,6 +235,8 @@ const luaL_Reg AppFS_methods[] = {
   { "makeDirectory",      AppFS_makeDirectory                               },
   { "makeAllDirectories", AppFS_makeAllDirectories                          },
   { "removeDirectory",    AppFS_removeDirectory                             },
+  // Dialogs
+  { "chooseFolder",       AppFS_chooseFolder                                },
   { nullptr,              nullptr                                           }
 };
 

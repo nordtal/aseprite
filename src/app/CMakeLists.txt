@@ -228,6 +228,7 @@ if(ENABLE_SCRIPTING)
     script/pixel_color_object.cpp
     script/plugin_class.cpp
     script/point_class.cpp
+    script/process_class.cpp
     script/preferences_object.cpp
     script/properties_class.cpp
     script/range_class.cpp
@@ -250,6 +251,7 @@ if(ENABLE_SCRIPTING)
     script/tilesets_class.cpp
     script/timer_class.cpp
     script/tool_class.cpp
+    script/tree_widget.cpp
     script/uuid_class.cpp
     script/values.cpp
     script/version_class.cpp

@@ -28,6 +28,12 @@ bool show_file_selector(const std::string& title,
                         FileSelectorType type,
                         base::paths& output);
 
+// Shows the system's folder chooser, there is no custom one. Returns
+// false if the user cancels it or the system has none.
+bool show_folder_selector(const std::string& title,
+                          const std::string& initialPath,
+                          std::string& output);
+
 std::string get_initial_path_to_select_filename(const std::string& initialFilename);
 
 // Get/set the directory used for the file selector (custom one, and
