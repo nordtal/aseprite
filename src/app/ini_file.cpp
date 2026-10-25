@@ -11,21 +11,15 @@
 
 #include "app/ini_file.h"
 
+#include "app/app.h"
 #include "app/resource_finder.h"
+#include "app/settings_import.h"
 #include "base/fs.h"
+#include "base/log.h"
 #include "base/split_string.h"
 #include "base/string.h"
 #include "cfg/cfg.h"
 #include "fmt/format.h"
-
-#ifdef __APPLE__
-  #include "os/logger.h"
-  #include "os/system.h"
-#endif
-
-#ifndef _WIN32
-  #include "base/fs.h"
-#endif
 
 #include <cstdlib>
 #include <vector>
@@ -42,56 +36,23 @@ ConfigModule::ConfigModule()
   ResourceFinder rf;
   rf.includeUserDir("aseprite.ini");
 
-  // getFirstOrCreateDefault() will create the Aseprite directory
-  // inside the OS configuration folder (~/.config/aseprite/, etc.).
+  // getFirstOrCreateDefault() will create the app's directory
+  // inside the OS configuration folder.
   std::string fn = rf.getFirstOrCreateDefault();
 
-#ifdef __APPLE__
-
-  // On OS X we migrate from ~/.config/aseprite/* -> "~/Library/Application Support/Aseprite/*"
-  if (!base::is_file(fn)) {
+  // On the first start, the settings of an installed Aseprite can
+  // be the start of ours. Aseprite's own migrations of its older
+  // config locations would move its files here, so there are none.
+  if (!base::is_file(fn) && App::instance() && App::instance()->isGui()) {
     try {
-      std::string new_dir = base::get_file_path(fn);
-
-      // Now we try to move all old configuration files into the new
-      // directory.
-      ResourceFinder old_rf;
-      old_rf.includeHomeDir(".config/aseprite/aseprite.ini");
-      std::string old_config_fn = old_rf.defaultFilename();
-      if (base::is_file(old_config_fn)) {
-        std::string old_dir = base::get_file_path(old_config_fn);
-        for (std::string old_fn : base::list_files(old_dir)) {
-          std::string from = base::join_path(old_dir, old_fn);
-          std::string to = base::join_path(new_dir, old_fn);
-          base::move_file(from, to);
-        }
-        base::remove_directory(old_dir);
-      }
+      const std::string from = find_aseprite_settings();
+      if (!from.empty() && ask_to_import_aseprite_settings(from))
+        import_aseprite_settings(from, base::get_file_path(fn));
     }
-    // Something failed
     catch (const std::exception& ex) {
-      std::string err = "Error in configuration migration: ";
-      err += ex.what();
-
-      const os::SystemRef system = os::System::instance();
-      if (system && system->logger())
-        system->logger()->logError(err.c_str());
+      LOG(ERROR, "Copying the settings of Aseprite failed: %s\n", ex.what());
     }
   }
-
-#elif !defined(_WIN32)
-
-  // On Linux we migrate the old configuration file name
-  // (~/.asepriterc -> ~/.config/aseprite/aseprite.ini)
-  {
-    ResourceFinder old_rf;
-    old_rf.includeHomeDir(".asepriterc");
-    std::string old_fn = old_rf.defaultFilename();
-    if (base::is_file(old_fn))
-      base::move_file(old_fn, fn);
-  }
-
-#endif
 
   set_config_file(fn.c_str());
   g_configFilename = fn;
