@@ -65,6 +65,23 @@ do
   assert(code == 0)
 end
 
+-- A program that leaves a process behind that keeps writing ends too,
+-- with its own output first
+do
+  local started, first, left, exited = os.time(), nil, nil, nil
+  local p = Process{ cmd={ "sh", "-c", "echo first; yes & echo $! >&2; sleep 0.5" },
+                     onstdout=function(line) first = first or line end,
+                     onstderr=function(line) left = line end,
+                     onexit=function(code) exited = code end }
+  p:start()
+  assert(p:wait() == 0)
+  assert(exited == 0)
+  assert(os.time() - started < 10)
+  assert(first == "first")
+  assert(left)
+  p:stop(true)
+end
+
 -- The working directory
 do
   local dir = app.fs.joinPath(app.fs.tempPath, "process-cwd-test")

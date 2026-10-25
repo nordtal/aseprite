@@ -51,6 +51,11 @@ struct Event {
   int code = 0;
 };
 
+// What is read from a pipe after the process ended: a full pipe
+// buffer on Linux and macOS. A process it left behind could keep
+// writing for ever.
+constexpr std::size_t kDrainLimit = 64 * 1024;
+
 void dispatch(Process* process, lua_State* L);
 void dispatch_from_ui(Process* process);
 
@@ -208,8 +213,12 @@ private:
     return out;
   }
 
-  static bool is_batch_file(const std::string& program)
+  static bool is_batch_file(std::string program)
   {
+    // Windows drops trailing dots and spaces from a file name, so
+    // "run.bat. " runs run.bat
+    while (!program.empty() && (program.back() == '.' || program.back() == ' '))
+      program.pop_back();
     std::string ext = program.substr(program.size() < 4 ? 0 : program.size() - 4);
     for (char& c : ext)
       c = char(std::tolower((unsigned char)c));
@@ -269,7 +278,8 @@ private:
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
     std::vector<char> attrBuf(attrSize);
     auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrBuf.data());
-    BOOL ok = InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize) &&
+    const BOOL attrsReady = InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize);
+    BOOL ok = attrsReady &&
               UpdateProcThreadAttribute(attrs,
                                         0,
                                         PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
@@ -313,7 +323,8 @@ private:
       CloseHandle(pi.hProcess);
       ok = FALSE;
     }
-    DeleteProcThreadAttributeList(attrs);
+    if (attrsReady)
+      DeleteProcThreadAttributeList(attrs);
     CloseHandle(outWrite);
     CloseHandle(errWrite);
     if (nul != INVALID_HANDLE_VALUE)
@@ -335,19 +346,23 @@ private:
     m_waiter = std::thread([shared, process, outRead, errRead]() {
       std::atomic<bool> ended = false;
       // Reads until the pipe closes. Once the process ended, it reads
-      // what's left and stops, even if a process it started still
-      // holds the pipe.
+      // what's left, up to kDrainLimit, and stops, even if a process
+      // it started still holds the pipe.
       auto read_pipe = [&ended, &shared](HANDLE h, Kind kind) {
         std::string pending;
         char buf[4096];
+        std::size_t drained = 0;
         for (;;) {
           if (ended) {
             DWORD available = 0;
-            if (!PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr) || available == 0)
+            if (drained >= kDrainLimit ||
+                !PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr) || available == 0)
               break;
           }
           DWORD n = 0;
           if (ReadFile(h, buf, DWORD(sizeof(buf)), &n, nullptr)) {
+            if (ended)
+              drained += n;
             pending.append(buf, n);
             push_lines(shared, kind, pending);
           }
@@ -485,7 +500,7 @@ private:
   }
 
   // Reads stdout and stderr until the process ends. Then it reads
-  // what's left and stops, even if a process it started still holds
+  // what's left, up to kDrainLimit, and stops, even if a process it started still holds
   // the pipes, and pushes the exit code.
   static void read_until_end(const std::shared_ptr<Shared>& shared,
                              const pid_t pid,
@@ -503,9 +518,9 @@ private:
       { outFd, Kind::Stdout },
       { errFd, Kind::Stderr }
     };
-    // Reads once, returns false at the end of the pipe or when nothing
-    // is there to read
-    auto read_some = [&shared](Stream& s) {
+    // Reads once, returns how much, or 0 at the end of the pipe or
+    // when nothing is there to read
+    auto read_some = [&shared](Stream& s) -> std::size_t {
       char buf[4096];
       ssize_t n;
       do {
@@ -514,11 +529,11 @@ private:
       if (n <= 0) {
         if (n == 0 || errno != EAGAIN)
           s.open = false;
-        return false;
+        return 0;
       }
       s.pending.append(buf, n);
       push_lines(shared, s.kind, s.pending);
-      return true;
+      return std::size_t(n);
     };
 
     int code = -1;
@@ -554,7 +569,12 @@ private:
     for (auto& s : streams) {
       if (s.open) {
         fcntl(s.fd, F_SETFL, fcntl(s.fd, F_GETFL) | O_NONBLOCK);
-        while (read_some(s)) {}
+        for (std::size_t drained = 0; drained < kDrainLimit;) {
+          const std::size_t n = read_some(s);
+          if (n == 0)
+            break;
+          drained += n;
+        }
       }
       push_rest(shared, s.kind, s.pending);
       close(s.fd);
