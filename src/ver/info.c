@@ -7,7 +7,7 @@
 #include "ver/info.h"
 #include "generated_version.h" /* It defines the VERSION macro */
 
-#define PACKAGE   "Aseprite"
+#define PACKAGE   "Nordtal Designer"
 #define COPYRIGHT "Copyright (C) 2001-2025 Igara Studio S.A."
 
 #if defined(_WIN32) || defined(__APPLE__)

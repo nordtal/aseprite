@@ -26,6 +26,11 @@
 
 namespace app {
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// Folder inside $XDG_CONFIG_HOME, apart from the one of the official Aseprite
+static constexpr const char* kLinuxConfigDir = "nordtal-designer";
+#endif
+
 ResourceFinder::ResourceFinder(bool log) : m_log(log), m_current(-1)
 {
 }
@@ -88,13 +93,13 @@ void ResourceFinder::includeDataDir(const char* filename)
 #ifdef _WIN32
 
   std::snprintf(buf, sizeof(buf), "data/%s", filename);
-  includeHomeDir(buf); // %AppData%/Aseprite/data/filename
+  includeHomeDir(buf); // %AppData%/<app name>/data/filename
   includeBinDir(buf);  // $BINDIR/data/filename
 
 #elif __APPLE__
 
   std::snprintf(buf, sizeof(buf), "data/%s", filename);
-  includeUserDir(buf); // $HOME/Library/Application Support/Aseprite/data/filename
+  includeUserDir(buf); // $HOME/Library/Application Support/<app name>/data/filename
   includeBinDir(buf);  // $BINDIR/data/filename (outside the bundle)
 
   std::snprintf(buf, sizeof(buf), "../Resources/data/%s", filename);
@@ -102,8 +107,8 @@ void ResourceFinder::includeDataDir(const char* filename)
 
 #else
 
-  // $HOME/.config/aseprite/filename
-  std::snprintf(buf, sizeof(buf), "aseprite/data/%s", filename);
+  // $HOME/.config/nordtal-designer/filename
+  std::snprintf(buf, sizeof(buf), "%s/data/%s", kLinuxConfigDir, filename);
   includeHomeConfigDir(buf);
 
   // $BINDIR/data/filename
@@ -121,10 +126,10 @@ void ResourceFinder::includeHomeDir(const char* filename)
 {
 #ifdef _WIN32
 
-  // %AppData%/Aseprite/filename
+  // %AppData%/<app name>/filename
   wchar_t* env = _wgetenv(L"AppData");
   if (env) {
-    std::string path = base::join_path(base::to_utf8(env), "Aseprite");
+    std::string path = base::join_path(base::to_utf8(env), get_app_name());
     path = base::join_path(path, filename);
     addPath(path);
     m_default = path;
@@ -179,7 +184,7 @@ void ResourceFinder::includeUserDir(const char* filename)
     includeBinDir(filename);
   }
   else {
-    // %AppData%/Aseprite/filename
+    // %AppData%/<app name>/filename
     includeHomeDir(filename);
   }
 
@@ -192,15 +197,15 @@ void ResourceFinder::includeUserDir(const char* filename)
   else {
   #ifdef __APPLE__
 
-    // $HOME/Library/Application Support/Aseprite/filename
+    // $HOME/Library/Application Support/<app name>/filename
     addPath(
       base::join_path(base::join_path(base::get_lib_app_support_path(), get_app_name()), filename)
         .c_str());
 
   #else // !__APPLE__
 
-    // $HOME/.config/aseprite/filename
-    includeHomeConfigDir((std::string("aseprite/") + filename).c_str());
+    // $HOME/.config/nordtal-designer/filename
+    includeHomeConfigDir(base::join_path(kLinuxConfigDir, filename).c_str());
 
   #endif
   }
