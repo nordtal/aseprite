@@ -15,6 +15,7 @@
 #include "ui/box.h"
 
 #include <functional>
+#include <memory>
 
 namespace app {
 class Doc;
@@ -61,6 +62,11 @@ public:
   void onTabPopup(Workspace* workspace) override {}
   InputChainElement* onGetInputChainElement() override;
   DocView* docView() override;
+  void removeEmbeddedView(DocView* view) override;
+
+  // The embedded document went away without the script: it was closed
+  // in the tab, or another tab embedded it. Fired after the change.
+  obs::signal<void()> DocumentChange;
 
 private:
   bool isOpen() const { return parent() != nullptr; }
@@ -73,6 +79,8 @@ private:
   doc::ObjectId m_docId = doc::NullId;
   bool m_closable = true;
   obs::scoped_connection m_exitConn;
+  // Tells a deferred event whether the tab still exists
+  std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
 };
 
 } // namespace script

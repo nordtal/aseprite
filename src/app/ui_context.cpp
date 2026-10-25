@@ -334,12 +334,14 @@ void UIContext::onRemoveDocument(Doc* doc)
 
     bool embedded = false;
     for (DocView* docView : getAllDocViews(doc)) {
-      // An embedded view leaves its host when it's deleted
-      if (docView->host())
+      if (WorkspaceView* host = docView->host()) {
+        host->removeEmbeddedView(docView);
         embedded = true;
-      else
+      }
+      else {
         workspace->removeView(docView);
-      delete docView;
+        delete docView;
+      }
     }
 
     // The host stays active and has to show that it has no document

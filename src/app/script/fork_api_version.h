@@ -13,7 +13,7 @@
 // API_VERSION, which belongs to Aseprite.
 //
 // 1: Process, app.fs.chooseFolder(), Dialog:tree{} and Dialog:modifyNode{}
-// 2: Dialog{ tab=true, closable } and Dialog:editor{}
+// 2: Dialog{ tab=true, closable } and Dialog:editor{ sprite, onchange }
 #define FORK_API_VERSION 2
 
 #endif

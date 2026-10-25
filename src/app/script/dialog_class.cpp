@@ -879,9 +879,13 @@ int Dialog_button_base(lua_State* L, T** outputWidget = nullptr)
   }
 
   if (closeWindowByDefault) {
-    // The widgets of a tab aren't inside the dialog's window
+    // The widgets of a tab aren't inside the dialog's window. A tab
+    // that can't be closed only closes with Dialog:close().
     if (dlg->tab)
-      widget->Click.connect([dlg, widget]() { dlg->window.closeWindow(widget); });
+      widget->Click.connect([dlg, widget]() {
+        if (dlg->tab->isTabClosable())
+          dlg->window.closeWindow(widget);
+      });
     else
       widget->Click.connect([widget]() { widget->closeWindow(); });
   }
@@ -1630,12 +1634,21 @@ int Dialog_editor(lua_State* L)
   if (dlg->tab->editorSlot())
     return luaL_error(L, "a Dialog has one editor at most");
 
-  auto slot = new ui::VBox;
-  dlg->tab->setEditorSlot(slot);
-
+  // Read before the slot exists, as it can raise an error
+  Doc* doc = nullptr;
   if (lua_istable(L, 2)) {
     lua_getfield(L, 2, "sprite");
-    dlg->tab->setDocument(get_editor_doc(L, -1));
+    doc = get_editor_doc(L, -1);
+    lua_pop(L, 1);
+  }
+
+  auto slot = new ui::VBox;
+  dlg->tab->setEditorSlot(slot);
+  dlg->tab->setDocument(doc);
+
+  if (lua_istable(L, 2)) {
+    if (lua_getfield(L, 2, "onchange") == LUA_TFUNCTION)
+      Dialog_connect_signal(L, 1, dlg->tab->DocumentChange, [](lua_State*) {});
     lua_pop(L, 1);
   }
   return Dialog_add_widget(L, slot);

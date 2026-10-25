@@ -7,12 +7,17 @@ ui_test(function()
   -- An editor needs a tab dialog
   assert(not pcall(function() Dialog("Window"):editor{ id="editor" } end))
 
-  local closes = 0
+  -- A wrong sprite is an error, and leaves the dialog without an editor
+  local bad = Dialog{ tab=true }
+  assert(not pcall(function() bad:editor{ id="editor", sprite=5 } end))
+  bad:editor{ id="editor" }
+
+  local closes, changes = 0, 0
   local dlg = Dialog{ title="Nordtal", tab=true, closable=false,
                       onclose=function() closes = closes + 1 end }
   dlg:label{ id="info", text="Workspace" }
   dlg:button{ id="ok", text="OK" }
-  dlg:editor{ id="editor" }
+  dlg:editor{ id="editor", onchange=function() changes = changes + 1 end }
   assert(dlg.data.editor == nil)
 
   -- Before the tab is shown, the editor remembers its sprite
@@ -53,13 +58,27 @@ ui_test(function()
   assert(dlg.data.editor == nil)
   assert(app.sprite == nil)
 
-  -- Closing in the tab closes its sprite, the tab stays
+  -- Closing in the tab closes its sprite, the tab stays, and onchange
+  -- tells the script
   dlg:modify{ id="editor", sprite=other }
   assert(app.sprite == other)
   app.command.CloseFile()
   assert(dlg.data.editor == nil)
   assert(app.sprite == nil)
   assert(closes == 0)
+  dlg:modify{ id="editor", sprite=spr }
+  assert(app.sprite == spr)
+
+  -- Another tab that embeds the sprite takes it, and onchange tells
+  -- the first one
+  local dlg2 = Dialog{ title="Other", tab=true }
+  dlg2:editor{ id="editor", sprite=spr }
+  dlg2:show()
+  assert(dlg2.data.editor == spr)
+  assert(dlg.data.editor == nil)
+  assert(app.sprite == spr)
+  dlg2:close()
+  assert(app.sprite == spr)
   dlg:modify{ id="editor", sprite=spr }
   assert(app.sprite == spr)
 
@@ -75,4 +94,14 @@ ui_test(function()
   dlg:show()
   assert(app.sprite == spr)
   assert(dlg.data.editor == spr)
+
+  -- The events of a change the script didn't make arrive after it
+  assert(changes == 0)
+  return function()
+    if changes < 2 then
+      return false
+    end
+    assert(changes == 2)
+    return true
+  end
 end)

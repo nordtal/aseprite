@@ -51,6 +51,11 @@ public:
   // show a document without being a DocView, e.g. a script tab with
   // an embedded editor.
   virtual DocView* docView() { return nullptr; }
+
+  // Deletes a document view that this view hosts (see
+  // DocView::setHost()), because its document closes or another view
+  // embeds it.
+  virtual void removeEmbeddedView(DocView* view) {}
 };
 
 } // namespace app

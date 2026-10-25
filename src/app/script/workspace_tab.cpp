@@ -20,6 +20,7 @@
 #include "app/ui/workspace.h"
 #include "app/ui_context.h"
 #include "ui/app_state.h"
+#include "ui/system.h"
 
 namespace app { namespace script {
 
@@ -125,6 +126,20 @@ DocView* WorkspaceTab::docView()
   return nullptr;
 }
 
+void WorkspaceTab::removeEmbeddedView(DocView* view)
+{
+  ASSERT(view == docView());
+  delete view;
+  m_docId = doc::NullId;
+  invalidate();
+
+  // The script hears of it once the closing or the move is over
+  ui::execute_from_ui_thread([this, alive = std::weak_ptr<bool>(m_alive)] {
+    if (alive.lock())
+      DocumentChange();
+  });
+}
+
 void WorkspaceTab::updateDocView()
 {
   Workspace* workspace = App::instance()->workspace();
@@ -142,11 +157,15 @@ void WorkspaceTab::updateDocView()
       ctx->addDocView(oldDoc);
     }
 
-    // The new one leaves its tabs
+    // The new one leaves its tabs, or the tab that embeds it
     if (doc) {
       for (DocView* view : ctx->getAllDocViews(doc)) {
-        workspace->removeView(view);
-        delete view;
+        if (WorkspaceView* host = view->host())
+          host->removeEmbeddedView(view);
+        else {
+          workspace->removeView(view);
+          delete view;
+        }
       }
 
       auto view = new DocView(doc,
