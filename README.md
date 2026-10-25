@@ -1,3 +1,19 @@
+# Nordtal Designer
+
+This repository builds Nordtal Designer, a copy of Aseprite with its own name, config directory
+and icon. It is installed beside the official Aseprite and registers no file types.
+
+A tag `v<aseprite version>-designer.<n>` builds unsigned packages for macOS arm64 and Windows x64
+and attaches them to its release.
+
+**macOS**: download `Nordtal-Designer-macOS-arm64.zip` from the newest release, then run
+
+    ditto -x -k ~/Downloads/Nordtal-Designer-macOS-arm64.zip /Applications && xattr -dr com.apple.quarantine "/Applications/Nordtal Designer.app"
+
+**Windows**: download `Nordtal-Designer-Windows-x64.zip` from the newest release, unzip it and run
+`Nordtal Designer.exe`. SmartScreen warns about an unknown publisher: click *More info*, then
+*Run anyway*.
+
 # Aseprite
 
 [![build](https://github.com/aseprite/aseprite/actions/workflows/build.yml/badge.svg)](https://github.com/aseprite/aseprite/actions/workflows/build.yml)

@@ -96,9 +96,13 @@ add_subdirectory(app)
 ######################################################################
 # Output bin/data/ directory where we are going to copy data files
 
+# Name of the executable on macOS and Windows, the one on Linux stays
+# "aseprite" so it can be called without quotes.
+set(APP_OUTPUT_NAME "Nordtal Designer")
+
 set(ORIGINAL_DATA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/data)
 if(ENABLE_ASEPRITE_EXE AND APPLE)
-  set(DATA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/Aseprite.app/Contents/Resources/data)
+  set(DATA_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/${APP_OUTPUT_NAME}.app/Contents/Resources/data")
 else()
   set(DATA_OUTPUT_DIR ${ORIGINAL_DATA_OUTPUT_DIR})
 endif()
@@ -193,6 +197,9 @@ if(ENABLE_ASEPRITE_EXE)
   if(APPLE)
     set(BUNDLE_PARAM MACOSX_BUNDLE)
     set(INSTALL_OPT BUNDLE)
+    set(main_resources main/osx/Designer.icns)
+    set_source_files_properties(main/osx/Designer.icns PROPERTIES
+      MACOSX_PACKAGE_LOCATION Resources)
   endif()
 
   add_executable(aseprite ${BUNDLE_PARAM}
@@ -204,18 +211,21 @@ if(ENABLE_ASEPRITE_EXE)
     endif()
   endif()
   set_target_properties(aseprite PROPERTIES LINK_FLAGS "${LAF_BACKEND_LINK_FLAGS}")
+  if(APPLE OR WIN32)
+    set_target_properties(aseprite PROPERTIES OUTPUT_NAME "${APP_OUTPUT_NAME}")
+  endif()
   if(APPLE)
     set_target_properties(aseprite PROPERTIES
       MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/main/osx/Info.plist")
 
-    # As the output now is inside the Aseprite.app bundle, we generate
-    # a symlink to replace the old bin/aseprite binary and run the
+    # As the output now is inside the app bundle, we generate a
+    # symlink to replace the old bin/aseprite binary and run the
     # binary inside the .app bundle.
     add_custom_command(
       TARGET aseprite POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_BINARY_DIR}/bin/Aseprite.app/Contents/MacOS/aseprite" "${CMAKE_BINARY_DIR}/bin/aseprite")
+      COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_BINARY_DIR}/bin/${APP_OUTPUT_NAME}.app/Contents/MacOS/${APP_OUTPUT_NAME}" "${CMAKE_BINARY_DIR}/bin/aseprite")
 
-    # Create a bin/data link to bin/Aseprite.app/Contents/Resources/data
+    # Create a bin/data link to the data inside the app bundle
     # so tests can load the data too (as tests aren't linked inside the
     # app bundle)
     if(IS_DIRECTORY "${ORIGINAL_DATA_OUTPUT_DIR}" AND
