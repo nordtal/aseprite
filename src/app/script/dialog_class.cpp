@@ -58,6 +58,7 @@
 #include "ui/system.h"
 #include "ui/view.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <stack>
@@ -2389,9 +2390,10 @@ void register_dialog_class(lua_State* L)
 // close all opened Dialogs before closing the UI
 void close_all_dialogs()
 {
-  for (Dialog* dlg : all_dialogs) {
-    ASSERT(dlg);
-    if (dlg)
+  // An onclose can open or end dialogs, which changes the list
+  const std::vector<Dialog*> dialogs = all_dialogs;
+  for (Dialog* dlg : dialogs) {
+    if (std::find(all_dialogs.begin(), all_dialogs.end(), dlg) != all_dialogs.end())
       dlg->window.closeWindow(nullptr);
   }
 }
