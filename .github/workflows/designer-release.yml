@@ -1,24 +1,29 @@
 name: designer-release
+# A tag builds both packages for its release. A manual run builds the
+# chosen platforms from any branch and keeps the packages as artifacts.
 on:
   push:
     tags: ['v*-designer.*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        options: [all, macos, windows]
+        default: all
 permissions:
   contents: write
 jobs:
   package:
     strategy:
       fail-fast: false
+      # An include for a platform that isn't in the list would add a
+      # job of its own, so the values per platform are expressions.
       matrix:
-        include:
-        - os: macos-latest
-          platform: macos
-          arch: arm64
-          package: Nordtal-Designer-macOS-arm64.zip
-        - os: windows-latest
-          platform: windows
-          arch: x64
-          package: Nordtal-Designer-Windows-x64.zip
-    runs-on: ${{ matrix.os }}
+        platform: ${{ fromJSON((inputs.platform == '' || inputs.platform == 'all') && '["macos","windows"]' || format('["{0}"]', inputs.platform)) }}
+    runs-on: ${{ matrix.platform }}-latest
+    env:
+      ARCH: ${{ matrix.platform == 'macos' && 'arm64' || 'x64' }}
+      PACKAGE: Nordtal-Designer-${{ matrix.platform == 'macos' && 'macOS-arm64' || 'Windows-x64' }}.zip
     timeout-minutes: 60
     defaults:
       run:
@@ -30,10 +35,10 @@ jobs:
         fetch-depth: 0
     - name: Install Skia
       run: |
-        skia_url=$(bash laf/misc/skia-url.sh release ${{ matrix.platform }} ${{ matrix.arch }} | xargs)
+        skia_url=$(bash laf/misc/skia-url.sh release ${{ matrix.platform }} ${{ env.ARCH }} | xargs)
         curl --ssl-revoke-best-effort -L -o skia.zip "$skia_url"
         unzip -q skia.zip -d skia
-    - uses: aseprite/get-ninja@main
+    - uses: aseprite/get-ninja@27788a2a3a1d6106713702d6741e4ee95f3cc10a # main
     - uses: TheMrMilchmann/setup-msvc-dev@v4
       if: runner.os == 'Windows'
       with:
@@ -47,23 +52,29 @@ jobs:
           -DENABLE_CCACHE=off \
           -DLAF_BACKEND=skia \
           -DSKIA_DIR="$(pwd)/skia" \
-          -DSKIA_LIBRARY_DIR="$(pwd)/skia/out/Release-${{ matrix.arch }}"
+          -DSKIA_LIBRARY_DIR="$(pwd)/skia/out/Release-${{ env.ARCH }}"
     - name: Build
       run: ninja -C build aseprite
     - name: Package
       run: |
         if [[ "${{ runner.os }}" == "macOS" ]] ; then
-          ditto -c -k --keepParent "build/bin/Nordtal Designer.app" "${{ matrix.package }}"
+          ditto -c -k --keepParent "build/bin/Nordtal Designer.app" "${{ env.PACKAGE }}"
         else
           mkdir -p "package/Nordtal Designer"
           cp "build/bin/Nordtal Designer.exe" "package/Nordtal Designer/"
           cp -r build/bin/data "package/Nordtal Designer/"
-          cd package && 7z a "../${{ matrix.package }}" "Nordtal Designer"
+          cd package && 7z a "../${{ env.PACKAGE }}" "Nordtal Designer"
         fi
+    - uses: actions/upload-artifact@v7
+      if: github.event_name == 'workflow_dispatch'
+      with:
+        name: ${{ env.PACKAGE }}
+        path: ${{ env.PACKAGE }}
     - name: Attach to the release
+      if: github.event_name == 'push'
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
         gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "" || true
-        gh release upload "$GITHUB_REF_NAME" "${{ matrix.package }}" --clobber
+        gh release upload "$GITHUB_REF_NAME" "${{ env.PACKAGE }}" --clobber

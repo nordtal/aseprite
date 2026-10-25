@@ -1,0 +1,3 @@
+# A pull request's body holds only what github-flow allows, so the summary goes into the walkthrough comment.
+reviews:
+  high_level_summary_in_walkthrough: true
