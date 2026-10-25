@@ -23,6 +23,7 @@
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
 #include "app/script/api_version.h"
+#include "app/script/fork_api_version.h"
 #include "app/script/docobj.h"
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
@@ -763,6 +764,12 @@ int App_get_apiVersion(lua_State* L)
   return 1;
 }
 
+int App_get_forkApiVersion(lua_State* L)
+{
+  lua_pushinteger(L, FORK_API_VERSION);
+  return 1;
+}
+
 int App_get_tool(lua_State* L)
 {
   tools::Tool* tool = App::instance()->activeToolManager()->activeTool();
@@ -915,6 +922,7 @@ const Property App_properties[] = {
   { "bgTile",         App_get_bgTile,         App_set_bgTile         },
   { "version",        App_get_version,        nullptr                },
   { "apiVersion",     App_get_apiVersion,     nullptr                },
+  { "forkApiVersion", App_get_forkApiVersion, nullptr                },
   { "site",           App_get_site,           nullptr                },
   { "range",          App_get_range,          nullptr                },
   { "isUIAvailable",  App_get_isUIAvailable,  nullptr                },
