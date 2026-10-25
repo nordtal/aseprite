@@ -9,6 +9,10 @@
 #include "app/settings_import.h"
 #include "base/file_content.h"
 #include "base/fs.h"
+#include "cfg/cfg.h"
+
+#include <algorithm>
+#include <filesystem>
 
 using namespace app;
 
@@ -60,9 +64,11 @@ TEST(SettingsImport, CopiesPreferencesPalettesAndShortcuts)
   write(from, "extensions/x/package.json", "{}\n");
   write(from, "Aseprite.log", "log\n");
 
-  import_aseprite_settings(from, to);
+  EXPECT_TRUE(import_aseprite_settings(from, to));
 
-  EXPECT_EQ("[general]\nscreen_scale = 2\n", read(to, "aseprite.ini"));
+  cfg::CfgFile ini;
+  ini.load(base::join_path(to, "aseprite.ini"));
+  EXPECT_EQ(2, ini.getIntValue("general", "screen_scale", 0));
   EXPECT_EQ("<keys />\n", read(to, "user.aseprite-keys"));
   EXPECT_EQ("GIMP Palette\n", read(to, "palettes/a.gpl"));
   EXPECT_EQ("GIMP Palette\n", read(to, "palettes/more/b.gpl"));
@@ -76,7 +82,7 @@ TEST(SettingsImport, CopiesWhatThereIs)
   const std::string to = fresh_dir("to");
   write(from, "palettes/a.gpl", "GIMP Palette\n");
 
-  import_aseprite_settings(from, to);
+  EXPECT_TRUE(import_aseprite_settings(from, to));
 
   EXPECT_EQ("GIMP Palette\n", read(to, "palettes/a.gpl"));
   EXPECT_FALSE(base::is_file(base::join_path(to, "aseprite.ini")));
@@ -90,4 +96,53 @@ TEST(SettingsImport, OnlyADirectoryWithSettingsHasThem)
   EXPECT_FALSE(has_aseprite_settings(dir));
   write(dir, "user.aseprite-keys", "<keys />\n");
   EXPECT_TRUE(has_aseprite_settings(dir));
+}
+
+TEST(SettingsImport, DropsRecentFilesAndScriptAccess)
+{
+  const std::string from = fresh_dir("from");
+  const std::string to = fresh_dir("to");
+  write(from,
+        "aseprite.ini",
+        "[general]\nscreen_scale = 2\n"
+        "[RecentFiles]\n0000 = /a.aseprite\n"
+        "[RecentPaths]\n0000 = /art\n"
+        "[PinnedFiles]\n0000 = /b.aseprite\n"
+        "[script_access]\n0123456789abcdef = 1\n"
+        "[theme]\nselected = dark\n");
+
+  EXPECT_TRUE(import_aseprite_settings(from, to));
+
+  cfg::CfgFile ini;
+  ini.load(base::join_path(to, "aseprite.ini"));
+  std::vector<std::string> sections;
+  ini.getAllSections(sections);
+  std::sort(sections.begin(), sections.end());
+  EXPECT_EQ((std::vector<std::string>{ "PinnedFiles", "general", "theme" }), sections);
+  EXPECT_EQ(2, ini.getIntValue("general", "screen_scale", 0));
+  EXPECT_STREQ("/b.aseprite", ini.getValue("PinnedFiles", "0000", ""));
+  EXPECT_STREQ("dark", ini.getValue("theme", "selected", ""));
+
+  // The source keeps everything
+  EXPECT_NE(std::string::npos, read(from, "aseprite.ini").find("[script_access]"));
+}
+
+TEST(SettingsImport, RefusesToCopyADirectoryOntoItself)
+{
+  const std::string from = fresh_dir("self");
+  write(from, "aseprite.ini", "[general]\nscreen_scale = 2\n");
+  write(from, "palettes/a.gpl", "GIMP Palette\n");
+
+  // The same directory, also through a symlink
+  const std::string link = base::join_path(base::get_temp_path(), "settings_import_tests_link");
+  std::error_code ec;
+  std::filesystem::remove(link, ec);
+  std::filesystem::create_directory_symlink(from, link, ec);
+
+  EXPECT_FALSE(import_aseprite_settings(from, from));
+  if (!ec)
+    EXPECT_FALSE(import_aseprite_settings(from, link));
+  EXPECT_EQ("[general]\nscreen_scale = 2\n", read(from, "aseprite.ini"));
+  EXPECT_EQ("GIMP Palette\n", read(from, "palettes/a.gpl"));
+  std::filesystem::remove(link, ec);
 }

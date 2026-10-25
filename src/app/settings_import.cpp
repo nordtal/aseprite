@@ -12,6 +12,7 @@
 
 #include "base/fs.h"
 #include "base/string.h"
+#include "cfg/cfg.h"
 
 #if LAF_WINDOWS
   #include <windows.h>
@@ -20,11 +21,24 @@
 #endif
 
 #include <cstdlib>
+#include <filesystem>
 
 namespace app {
 
 // What the import copies from the config directory of Aseprite
 static const char* kSettings[] = { "aseprite.ini", "user.aseprite-keys", "palettes" };
+
+// Sections of aseprite.ini that stay behind: the recent files and
+// folders, and the access granted to scripts in Aseprite
+static const char* kDroppedSections[] = { "RecentFiles", "RecentPaths", "script_access" };
+
+// True if both paths are the same directory, through a symlink or an
+// ASEPRITE_USER_FOLDER too. Copying it onto itself would empty its files.
+static bool same_directory(const std::string& a, const std::string& b)
+{
+  std::error_code ec;
+  return std::filesystem::equivalent(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+}
 
 static void copy_tree(const std::string& from, const std::string& to)
 {
@@ -38,7 +52,7 @@ static void copy_tree(const std::string& from, const std::string& to)
   }
 }
 
-std::string find_aseprite_settings()
+std::string find_aseprite_settings(const std::string& to)
 {
   std::string dir;
 #if LAF_WINDOWS
@@ -49,7 +63,9 @@ std::string find_aseprite_settings()
   // $HOME/Library/Application Support/Aseprite
   dir = base::join_path(base::get_lib_app_support_path(), "Aseprite");
 #endif
-  return (!dir.empty() && has_aseprite_settings(dir) ? dir : std::string());
+  if (dir.empty() || !has_aseprite_settings(dir) || same_directory(dir, to))
+    return std::string();
+  return dir;
 }
 
 bool has_aseprite_settings(const std::string& dir)
@@ -62,13 +78,26 @@ bool has_aseprite_settings(const std::string& dir)
   return false;
 }
 
-void import_aseprite_settings(const std::string& from, const std::string& to)
+bool import_aseprite_settings(const std::string& from, const std::string& to)
 {
+  if (same_directory(from, to))
+    return false;
+
   for (const char* item : kSettings) {
     const std::string path = base::join_path(from, item);
     if (base::is_file(path) || base::is_directory(path))
       copy_tree(path, base::join_path(to, item));
   }
+
+  const std::string ini = base::join_path(to, "aseprite.ini");
+  if (base::is_file(ini)) {
+    cfg::CfgFile cfg;
+    cfg.load(ini);
+    for (const char* section : kDroppedSections)
+      cfg.deleteSection(section);
+    cfg.save();
+  }
+  return true;
 }
 
 bool ask_to_import_aseprite_settings(const std::string& from)

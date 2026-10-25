@@ -45,9 +45,10 @@ ConfigModule::ConfigModule()
   // config locations would move its files here, so there are none.
   if (!base::is_file(fn) && App::instance() && App::instance()->isGui()) {
     try {
-      const std::string from = find_aseprite_settings();
+      const std::string to = base::get_file_path(fn);
+      const std::string from = find_aseprite_settings(to);
       if (!from.empty() && ask_to_import_aseprite_settings(from))
-        import_aseprite_settings(from, base::get_file_path(fn));
+        import_aseprite_settings(from, to);
     }
     catch (const std::exception& ex) {
       LOG(ERROR, "Copying the settings of Aseprite failed: %s\n", ex.what());
