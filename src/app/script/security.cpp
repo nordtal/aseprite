@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/context.h"
+#include "app/extensions.h"
 #include "app/i18n/strings.h"
 #include "app/ini_file.h"
 #include "app/launcher.h"
@@ -100,6 +101,22 @@ std::string get_script_filename(lua_State* L, int stackLevel)
     script = ar.source + 1;
 
   return script;
+}
+
+// A script of an extension that comes with the app is as trusted as
+// the app itself
+bool is_builtin_script(const std::string& script)
+{
+  const std::string fn = base::normalize_path(script);
+  for (const Extension* ext : App::instance()->extensions()) {
+    if (!ext->isBuiltinExtension())
+      continue;
+    const std::string dir = base::normalize_path(ext->path());
+    if (fn.size() > dir.size() && fn.compare(0, dir.size(), dir) == 0 &&
+        base::is_path_separator(fn[dir.size()]))
+      return true;
+  }
+  return false;
 }
 
 int unsupported(lua_State* L)
@@ -317,6 +334,9 @@ bool ask_access(lua_State* L,
       luaL_error(L, "no debug information (script filename) to secure io.open() call");
       return false;
     }
+
+    if (is_builtin_script(script))
+      return true;
 
     const char* section = "script_access";
     std::string key = get_key(script);

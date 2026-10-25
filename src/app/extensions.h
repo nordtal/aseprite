@@ -121,6 +121,7 @@ public:
   const std::string& version() const { return m_version; }
   const std::string& displayName() const { return m_displayName; }
   Category category() const { return m_category; }
+  bool isBuiltinExtension() const { return m_isBuiltinExtension; }
 
   const ExtensionItems& keys() const { return m_keys; }
   const Languages& languages() const { return m_languages; }
