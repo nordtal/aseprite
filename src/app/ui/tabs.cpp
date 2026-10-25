@@ -814,6 +814,9 @@ gfx::Rect Tabs::getTabCloseButtonBounds(Tab* tab, const gfx::Rect& box)
   int iconW = theme->dimensions.tabsCloseIconWidth();
   int iconH = theme->dimensions.tabsCloseIconHeight();
 
+  if (tab->view && !tab->view->isTabClosable())
+    return gfx::Rect();
+
   if (box.w - iconW > 32 * ui::guiscale() || tab == m_selected.get())
     return gfx::Rect(box.x2() - iconW, box.y + box.h / 2 - iconH / 2, iconW, iconH);
   else

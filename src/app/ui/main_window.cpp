@@ -258,7 +258,8 @@ void MainWindow::onLanguageChange()
 
 DocView* MainWindow::getDocView()
 {
-  return dynamic_cast<DocView*>(m_workspace->activeView());
+  WorkspaceView* view = m_workspace->activeView();
+  return (view ? view->docView() : nullptr);
 }
 
 HomeView* MainWindow::getHomeView()
@@ -600,7 +601,8 @@ void MainWindow::onDrop(ui::DragEvent& e)
 
 bool MainWindow::isTabModified(Tabs* tabs, TabView* tabView)
 {
-  if (DocView* docView = dynamic_cast<DocView*>(tabView)) {
+  auto view = dynamic_cast<WorkspaceView*>(tabView);
+  if (DocView* docView = (view ? view->docView() : nullptr)) {
     Doc* document = docView->document();
     return document->isModified();
   }
@@ -686,7 +688,8 @@ void MainWindow::onTabsContainerDoubleClicked(Tabs* tabs)
 void MainWindow::onMouseOverTab(Tabs* tabs, TabView* tabView)
 {
   // Note: tabView can be NULL
-  if (DocView* docView = dynamic_cast<DocView*>(tabView))
+  auto view = dynamic_cast<WorkspaceView*>(tabView);
+  if (DocView* docView = (view ? view->docView() : nullptr))
     m_statusBar->showDefaultText(docView->document());
   else if (tabView)
     m_statusBar->setStatusText(0, tabView->getTabText());

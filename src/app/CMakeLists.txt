@@ -256,6 +256,7 @@ if(ENABLE_SCRIPTING)
     script/values.cpp
     script/version_class.cpp
     script/window_class.cpp
+    script/workspace_tab.cpp
     shell.cpp
     ui/devconsole_view.cpp)
 endif()

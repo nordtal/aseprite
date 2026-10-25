@@ -16,12 +16,14 @@
 #include "app/doc.h"
 #include "app/file_selector.h"
 #include "app/script/canvas_widget.h"
+#include "app/script/docobj.h"
 #include "app/script/engine.h"
 #include "app/script/graphics_context.h"
 #include "app/script/keys.h"
 #include "app/script/luacpp.h"
 #include "app/script/tabs_widget.h"
 #include "app/script/tree_widget.h"
+#include "app/script/workspace_tab.h"
 #include "app/ui/button_set.h"
 #include "app/ui/color_button.h"
 #include "app/ui/color_shades.h"
@@ -30,9 +32,11 @@
 #include "app/ui/filename_field.h"
 #include "app/ui/main_window.h"
 #include "app/ui/window_with_hand.h"
+#include "app/ui/workspace.h"
 #include "base/fs.h"
 #include "base/paths.h"
 #include "base/remove_from_container.h"
+#include "doc/sprite.h"
 #include "os/screen.h"
 #include "os/system.h"
 #include "ui/app_state.h"
@@ -55,6 +59,7 @@
 #include "ui/view.h"
 
 #include <map>
+#include <memory>
 #include <stack>
 #include <string>
 #include <vector>
@@ -157,6 +162,10 @@ struct Dialog {
   int showRef = LUA_REFNIL;
   lua_State* L = nullptr;
 
+  // The workspace tab of a Dialog{ tab=true }, which shows the
+  // dialog's grid instead of the window.
+  std::unique_ptr<WorkspaceTab> tab;
+
   Dialog(const ui::Window::Type windowType, const std::string& title, bool sizeable)
     : window(windowType, title)
     , currentGrid(window.grid())
@@ -165,7 +174,19 @@ struct Dialog {
     all_dialogs.push_back(this);
   }
 
-  ~Dialog() { base::remove_from_container(all_dialogs, this); }
+  ~Dialog()
+  {
+    tab.reset();
+    base::remove_from_container(all_dialogs, this);
+  }
+
+  void makeTab(const std::string& title, bool closable)
+  {
+    tab = std::make_unique<WorkspaceTab>(window.grid(), [this] { window.closeWindow(nullptr); });
+    tab->setText(title);
+    tab->setClosable(closable);
+    window.Close.connect([this](ui::CloseEvent&) { tab->closeTab(); });
+  }
 
   ui::View* view() { return window.view(); }
 
@@ -356,6 +377,8 @@ int Dialog_new(lua_State* L)
   std::string title = "Script";
   bool sizeable = true;
   int autofit = kDefaultAutofit;
+  bool tab = false;
+  bool closable = true;
   if (lua_isstring(L, 1)) {
     title = lua_tostring(L, 1);
   }
@@ -379,6 +402,14 @@ int Dialog_new(lua_State* L)
     if (type != LUA_TNIL) {
       autofit = lua_tointeger(L, -1);
     }
+    lua_pop(L, 1);
+
+    type = lua_getfield(L, 1, "tab");
+    tab = (type != LUA_TNIL && lua_toboolean(L, -1));
+    lua_pop(L, 1);
+
+    type = lua_getfield(L, 1, "closable");
+    closable = (type == LUA_TNIL || lua_toboolean(L, -1));
     lua_pop(L, 1);
   }
 
@@ -419,6 +450,9 @@ int Dialog_new(lua_State* L)
     lua_pop(L, 1);
   }
 
+  if (tab)
+    dlg->makeTab(title, closable);
+
   // The showRef must be the last reference to the dialog to be
   // unreferenced after the window is closed (that's why this is the
   // last connection to ui::Window::Close)
@@ -440,6 +474,13 @@ int Dialog_show(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
   dlg->refShow(L);
+
+  // A tab opens beside the others and never waits
+  if (dlg->tab) {
+    dlg->tab->openTab();
+    lua_pushvalue(L, 1);
+    return 1;
+  }
 
   gfx::Rect initialBounds;
 
@@ -602,7 +643,8 @@ int Dialog_add_widget(lua_State* L, Widget* widget)
   bool visible = true;
   bool hexpand = true;
   // Canvas and Tree are vertically expansive by default too
-  bool vexpand = (widget->type() == Canvas::Type() || widget->type() == Tree::Type());
+  bool vexpand = (widget->type() == Canvas::Type() || widget->type() == Tree::Type() ||
+                  (dlg->tab && widget == dlg->tab->editorSlot()));
 
   // This is to separate different kind of widgets without label in
   // different rows. Separator widgets will always create a new row.
@@ -837,7 +879,11 @@ int Dialog_button_base(lua_State* L, T** outputWidget = nullptr)
   }
 
   if (closeWindowByDefault) {
-    widget->Click.connect([widget]() { widget->closeWindow(); });
+    // The widgets of a tab aren't inside the dialog's window
+    if (dlg->tab)
+      widget->Click.connect([dlg, widget]() { dlg->window.closeWindow(widget); });
+    else
+      widget->Click.connect([widget]() { widget->closeWindow(); });
   }
   if (widget->type() == ui::kButtonWidget || widget->type() == ui::kMenuItemWidget) {
     widget->Click.connect([dlg, widget]() { dlg->lastButton = widget; });
@@ -1567,6 +1613,34 @@ int Dialog_modifyNode(lua_State* L)
   return 1;
 }
 
+// Gets the document of a "sprite" field: a Sprite, or false/nil for none
+Doc* get_editor_doc(lua_State* L, int index)
+{
+  if (lua_isnil(L, index) || (lua_isboolean(L, index) && !lua_toboolean(L, index)))
+    return nullptr;
+  auto sprite = get_docobj<doc::Sprite>(L, index);
+  return static_cast<Doc*>(sprite->document());
+}
+
+int Dialog_editor(lua_State* L)
+{
+  auto dlg = get_obj<Dialog>(L, 1);
+  if (!dlg->tab)
+    return luaL_error(L, "Dialog:editor{} needs a Dialog{ tab=true }");
+  if (dlg->tab->editorSlot())
+    return luaL_error(L, "a Dialog has one editor at most");
+
+  auto slot = new ui::VBox;
+  dlg->tab->setEditorSlot(slot);
+
+  if (lua_istable(L, 2)) {
+    lua_getfield(L, 2, "sprite");
+    dlg->tab->setDocument(get_editor_doc(L, -1));
+    lua_pop(L, 1);
+  }
+  return Dialog_add_widget(L, slot);
+}
+
 int Dialog_tab(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
@@ -1698,6 +1772,10 @@ int Dialog_modify(lua_State* L)
       }
       if (const char* s = lua_tostring(L, -1)) {
         dlg->window.setText(s);
+        if (dlg->tab) {
+          dlg->tab->setText(s);
+          App::instance()->workspace()->updateTabs();
+        }
         relayout = true;
       }
       lua_pop(L, 1);
@@ -1874,13 +1952,24 @@ int Dialog_modify(lua_State* L)
     }
     lua_pop(L, 1);
 
+    type = lua_getfield(L, 2, "sprite");
+    if (type != LUA_TNIL && dlg->tab && widget == dlg->tab->editorSlot()) {
+      dlg->tab->setDocument(get_editor_doc(L, -1));
+      relayout = true;
+    }
+    lua_pop(L, 1);
+
     // TODO shades mode? file title / open / save / filetypes? on* events?
 
     // Relayout only if the the dialog window is not being resized.
     // This is due to the possibility of a script calling a method
     // to modify dialog's properties (which might generate a relayout)
     // during an ongoing resize event.
-    if (relayout && !dlg->window.isResizing()) {
+    if (relayout && dlg->tab) {
+      dlg->tab->layout();
+      dlg->tab->invalidate();
+    }
+    else if (relayout && !dlg->window.isResizing()) {
       gfx::Rect prelayoutBounds = dlg->window.bounds();
       dlg->window.layout();
 
@@ -2066,6 +2155,12 @@ int Dialog_get_data(lua_State* L)
           else
             lua_pushnil(L);
         }
+        else if (dlg->tab && widget == dlg->tab->editorSlot()) {
+          if (Doc* doc = dlg->tab->document())
+            push_docobj(L, doc->sprite());
+          else
+            lua_pushnil(L);
+        }
         else {
           lua_pushnil(L);
         }
@@ -2248,6 +2343,7 @@ const luaL_Reg Dialog_methods[] = {
   { "file",      Dialog_file      },
   { "canvas",    Dialog_canvas    },
   { "tree",      Dialog_tree      },
+  { "editor",    Dialog_editor    },
   { "tab",       Dialog_tab       },
   { "endtabs",   Dialog_endtabs   },
   { "modify",    Dialog_modify    },

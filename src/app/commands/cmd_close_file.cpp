@@ -65,7 +65,7 @@ protected:
     // Collect all document views
     DocViews docViews;
     for (auto view : *workspace) {
-      DocView* docView = dynamic_cast<DocView*>(view);
+      DocView* docView = view->docView();
       if (docView)
         docViews.push_back(docView);
     }

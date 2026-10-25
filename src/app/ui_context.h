@@ -34,6 +34,9 @@ public:
   DocView* activeView() const;
   void setActiveView(DocView* documentView);
 
+  // Opens a tab with a new view of the document.
+  void addDocView(Doc* doc);
+
   DocView* getFirstDocView(Doc* document) const override;
   DocViews getAllDocViews(Doc* document) const;
   Editors getAllEditorsIncludingPreview(Doc* document) const;

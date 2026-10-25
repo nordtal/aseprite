@@ -45,6 +45,9 @@ public:
 
   // Returns the tab background color
   virtual gfx::Color getTabColor() = 0;
+
+  // False when the tab shows no close button.
+  virtual bool isTabClosable() { return true; }
 };
 
 enum class DropTabResult {

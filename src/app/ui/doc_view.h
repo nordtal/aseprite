@@ -55,6 +55,12 @@ public:
 
   bool isPreview() { return m_type == Preview; }
 
+  // A view embedded in another workspace view (its host) has no tab
+  // of its own; the host's tab stands for it.
+  void setHost(WorkspaceView* host) { m_host = host; }
+  WorkspaceView* host() const { return m_host; }
+  WorkspaceView* workspaceView() { return m_host ? m_host : this; }
+
   // Preferred timeline scroll
   const gfx::Point& timelineScroll() { return m_timelineScroll; }
   void setTimelineScroll(const gfx::Point& pt) { m_timelineScroll = pt; }
@@ -73,6 +79,7 @@ public:
   bool onCloseView(Workspace* workspace, bool quitting) override;
   void onTabPopup(Workspace* workspace) override;
   InputChainElement* onGetInputChainElement() override { return this; }
+  DocView* docView() override { return this; }
 
   // DocObserver implementation
   void onGeneralUpdate(DocEvent& ev) override;
@@ -113,6 +120,7 @@ private:
   DocViewPreviewDelegate* m_previewDelegate;
   Editor* m_editor;
   gfx::Point m_timelineScroll;
+  WorkspaceView* m_host = nullptr;
 };
 
 } // namespace app

@@ -14,6 +14,7 @@ class Widget;
 }
 
 namespace app {
+class DocView;
 class InputChainElement;
 class Workspace;
 
@@ -45,6 +46,11 @@ public:
   virtual void onTabPopup(Workspace* workspace) = 0;
 
   virtual InputChainElement* onGetInputChainElement() { return nullptr; }
+
+  // The view of a document that this view shows, if any. A view can
+  // show a document without being a DocView, e.g. a script tab with
+  // an embedded editor.
+  virtual DocView* docView() { return nullptr; }
 };
 
 } // namespace app
