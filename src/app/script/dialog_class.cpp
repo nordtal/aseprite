@@ -1480,12 +1480,12 @@ int Dialog_tree(lua_State* L)
     if (lua_getfield(L, 2, "nodes") == LUA_TTABLE) {
       TreeNodes nodes;
       parse_tree_nodes(L, -1, nodes);
-      widget->setChildren(nullptr, std::move(nodes));
+      widget->model().setChildren(nullptr, std::move(nodes));
     }
     lua_pop(L, 1);
 
     if (lua_getfield(L, 2, "onchange") == LUA_TFUNCTION) {
-      Dialog_connect_signal(L, 1, widget->Change, [](lua_State* L, TreeNode* node) {
+      Dialog_connect_signal(L, 1, widget->model().Change, [](lua_State* L, TreeNode* node) {
         lua_pushstring(L, node->id.c_str());
         lua_setfield(L, -2, "node");
       });
@@ -1493,7 +1493,7 @@ int Dialog_tree(lua_State* L)
     lua_pop(L, 1);
 
     if (lua_getfield(L, 2, "onexpand") == LUA_TFUNCTION) {
-      Dialog_connect_signal(L, 1, widget->Expand, [](lua_State* L, TreeNode* node, bool expanded) {
+      Dialog_connect_signal(L, 1, widget->model().Expand, [](lua_State* L, TreeNode* node, bool expanded) {
         lua_pushstring(L, node->id.c_str());
         lua_setfield(L, -2, "node");
         lua_pushboolean(L, expanded);
@@ -1503,7 +1503,7 @@ int Dialog_tree(lua_State* L)
     lua_pop(L, 1);
 
     if (lua_getfield(L, 2, "oncontextmenu") == LUA_TFUNCTION) {
-      Dialog_connect_signal(L, 1, widget->ContextMenu, [](lua_State* L, TreeNode* node) {
+      Dialog_connect_signal(L, 1, widget->model().ContextMenu, [](lua_State* L, TreeNode* node) {
         lua_pushstring(L, node->id.c_str());
         lua_setfield(L, -2, "node");
       });
@@ -1547,7 +1547,7 @@ int Dialog_modifyNode(lua_State* L)
   if (lua_getfield(L, 2, "node") == LUA_TSTRING)
     nodeId = lua_tostring(L, -1);
   lua_pop(L, 1);
-  TreeNode* node = tree->findNode(nodeId);
+  TreeNode* node = tree->model().findNode(nodeId);
   if (!node)
     return luaL_error(L, "Given node=\"%s\" in Dialog:modifyNode{} not found", nodeId.c_str());
 
@@ -1559,9 +1559,9 @@ int Dialog_modifyNode(lua_State* L)
   node->id = oldId;
 
   if (hasChildren)
-    tree->setChildren(node, std::move(children));
+    tree->model().setChildren(node, std::move(children));
   else
-    tree->nodeChanged();
+    tree->model().nodeChanged();
 
   lua_pushvalue(L, 1);
   return 1;
@@ -1870,7 +1870,7 @@ int Dialog_modify(lua_State* L)
     if (type == LUA_TTABLE && widget->type() == Tree::Type()) {
       TreeNodes nodes;
       parse_tree_nodes(L, -1, nodes);
-      static_cast<Tree*>(widget)->setChildren(nullptr, std::move(nodes));
+      static_cast<Tree*>(widget)->model().setChildren(nullptr, std::move(nodes));
     }
     lua_pop(L, 1);
 
@@ -2061,7 +2061,7 @@ int Dialog_get_data(lua_State* L)
           lua_pushstring(L, tabStr.c_str());
         }
         else if (widget->type() == Tree::Type()) {
-          if (const TreeNode* node = static_cast<const Tree*>(widget)->selected())
+          if (const TreeNode* node = static_cast<const Tree*>(widget)->model().selected())
             lua_pushstring(L, node->id.c_str());
           else
             lua_pushnil(L);
@@ -2165,7 +2165,7 @@ int Dialog_set_data(lua_State* L)
         else if (widget->type() == Tree::Type()) {
           if (const char* id = lua_tostring(L, -1)) {
             auto tree = static_cast<Tree*>(widget);
-            tree->setSelected(tree->findNode(id));
+            tree->model().setSelected(tree->model().findNode(id));
           }
         }
         break;

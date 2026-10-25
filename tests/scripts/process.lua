@@ -41,6 +41,30 @@ do
   assert(err[1] == "bad")
 end
 
+-- A line keeps the zero bytes in it
+do
+  local out, err, code = run{ cmd={ "printf", "a\\0b\\n" } }
+  assert(code == 0)
+  assert(#out == 1)
+  assert(out[1] == "a\0b")
+end
+
+-- A program that leaves a process behind, which holds its output,
+-- ends when it ends, and stop() still reaches what it left behind
+do
+  local started, left = os.time(), nil
+  local p = Process{ cmd={ "sh", "-c", "sleep 300 & echo $!" },
+                     onstdout=function(line) left = line end }
+  p:start()
+  assert(p:wait() == 0)
+  assert(os.time() - started < 10)
+  assert(left)
+  p:stop(true)
+  local out, err, code = run{ cmd={ "sh", "-c",
+    "for i in $(seq 50) ; do kill -0 " .. left .. " 2>/dev/null || exit 0 ; sleep 0.1 ; done ; exit 1" } }
+  assert(code == 0)
+end
+
 -- The working directory
 do
   local dir = app.fs.joinPath(app.fs.tempPath, "process-cwd-test")

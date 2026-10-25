@@ -34,11 +34,14 @@ jobs:
         cmake -S . -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_CCACHE=on \
+          -DENABLE_TESTS=on \
           -DLAF_BACKEND=skia \
           -DSKIA_DIR=$PWD/skia \
           -DSKIA_LIBRARY_DIR=$PWD/skia/out/Release-x64
     - name: Build
-      run: ninja -C build aseprite
+      run: ninja -C build aseprite tree_widget_tests
+    - name: Unit tests
+      run: build/bin/tree_widget_tests
     - name: Script tests
       run: |
         export ASEPRITE=$PWD/build/bin/aseprite

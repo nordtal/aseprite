@@ -1,16 +1,5 @@
 -- Dialog:tree{} holds nodes with a label, an icon and a badge
 
--- In the GUI print() goes to the console window and the app doesn't
--- end with the script, so the result goes to stdout and the app ends
--- once its main loop runs. (dofile() would ask for read access, and
--- os.exit() isn't available.)
-local function ui_test(test)
-  local ok, msg = xpcall(test, debug.traceback)
-  io.stdout:write(ok and "PASS\n" or ("FAIL: " .. tostring(msg) .. "\n"))
-  io.stdout:flush()
-  Timer{ interval=0.1, ontick=function() app.exit() end }:start()
-end
-
 ui_test(function()
   assert(app.forkApiVersion >= 1)
 

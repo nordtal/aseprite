@@ -18,7 +18,6 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,11 +26,13 @@
 
 #ifdef _WIN32
   #include "base/string.h"
+  #include <cctype>
   #include <windows.h>
 #else
   #include <cerrno>
   #include <csignal>
   #include <fcntl.h>
+  #include <poll.h>
   #include <sys/wait.h>
   #include <unistd.h>
 #endif
@@ -50,7 +51,8 @@ struct Event {
   int code = 0;
 };
 
-void dispatch(Process* process);
+void dispatch(Process* process, lua_State* L);
+void dispatch_from_ui(Process* process);
 
 // State shared between a Process, its background threads and the
 // callbacks queued on the UI thread.
@@ -58,7 +60,9 @@ struct Shared {
   std::mutex mutex;
   std::condition_variable cv;
   std::deque<Event> events;
-  std::atomic<bool> exited = false;
+  // The process was reaped, so its ID can belong to another process.
+  // Guarded by the mutex.
+  bool reaped = false;
   // Only touched from the script thread
   Process* owner = nullptr;
 
@@ -77,33 +81,31 @@ struct Shared {
       ui::execute_from_ui_thread([weak]() {
         if (auto s = weak.lock()) {
           if (s->owner)
-            dispatch(s->owner);
+            dispatch_from_ui(s->owner);
         }
       });
     }
   }
 };
 
-void read_lines(const std::shared_ptr<Shared>& shared,
-                const Kind kind,
-                const std::function<long(char*, long)>& read)
+// Pushes the complete lines of the given output and keeps the rest.
+void push_lines(const std::shared_ptr<Shared>& shared, const Kind kind, std::string& pending)
 {
-  std::string pending;
-  char buf[4096];
-  long n;
-  while ((n = read(buf, sizeof(buf))) > 0) {
-    pending.append(buf, n);
-    std::size_t pos;
-    while ((pos = pending.find('\n')) != std::string::npos) {
-      std::string line = pending.substr(0, pos);
-      pending.erase(0, pos + 1);
-      if (!line.empty() && line.back() == '\r')
-        line.pop_back();
-      Shared::push(shared, { kind, std::move(line) });
-    }
+  std::size_t pos;
+  while ((pos = pending.find('\n')) != std::string::npos) {
+    std::string line = pending.substr(0, pos);
+    pending.erase(0, pos + 1);
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    Shared::push(shared, { kind, std::move(line) });
   }
+}
+
+void push_rest(const std::shared_ptr<Shared>& shared, const Kind kind, std::string& pending)
+{
   if (!pending.empty())
     Shared::push(shared, { kind, std::move(pending) });
+  pending.clear();
 }
 
 // A child process started from an argument list, without a shell.
@@ -111,6 +113,8 @@ void read_lines(const std::shared_ptr<Shared>& shared,
 // line and the exit code reach the Lua callbacks on the script thread.
 class Process {
 public:
+  // The main Lua thread, where the callbacks run in the GUI. The
+  // thread that created the object may be a coroutine that's gone.
   lua_State* L = nullptr;
   std::vector<std::string> cmd;
   std::string cwd;
@@ -124,26 +128,40 @@ public:
 
   Process() { shared->owner = this; }
 
+  // Kills what is left of the process, so the app never waits for it
   ~Process()
   {
     shared->owner = nullptr;
+    if (!started)
+      return;
     stop(true);
-    if (m_waiter.joinable())
-      m_waiter.join();
+    m_waiter.join();
 #ifdef _WIN32
-    if (m_process)
-      CloseHandle(m_process);
+    CloseHandle(m_process);
+    CloseHandle(m_job);
+#else
+    m_reader.join();
+    std::lock_guard lock(shared->mutex);
+    if (!shared->reaped) {
+      while (waitpid(m_pid, nullptr, 0) < 0 && errno == EINTR) {}
+      shared->reaped = true;
+    }
 #endif
   }
 
+  // Ends the process and every process it started. That works after
+  // the process ended too, for the ones it left behind.
   void stop(bool force)
   {
-    if (!started || shared->exited)
+    if (!started)
       return;
 #ifdef _WIN32
-    TerminateProcess(m_process, 1);
+    (void)force;
+    TerminateJobObject(m_job, 1);
 #else
-    ::kill(-m_pid, force ? SIGKILL : SIGTERM);
+    std::lock_guard lock(shared->mutex);
+    if (!shared->reaped)
+      ::kill(-m_pid, force ? SIGKILL : SIGTERM);
 #endif
   }
 
@@ -161,10 +179,13 @@ private:
 #ifdef _WIN32
 
   HANDLE m_process = nullptr;
+  // Holds the process and every process it starts, and kills them
+  // when it's closed
+  HANDLE m_job = nullptr;
 
-  static std::wstring quote_arg(const std::wstring& arg)
+  static std::wstring quote_arg(const std::wstring& arg, const bool always)
   {
-    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos)
+    if (!always && !arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos)
       return arg;
     std::wstring out = L"\"";
     for (auto it = arg.begin();; ++it) {
@@ -187,8 +208,27 @@ private:
     return out;
   }
 
+  static bool is_batch_file(const std::string& program)
+  {
+    std::string ext = program.substr(program.size() < 4 ? 0 : program.size() - 4);
+    for (char& c : ext)
+      c = char(std::tolower((unsigned char)c));
+    return (ext == ".bat" || ext == ".cmd");
+  }
+
   std::string spawn()
   {
+    // Windows runs a batch file through cmd.exe, which reads the
+    // command line with rules of its own. An argument that cmd.exe
+    // could take as a command is refused.
+    const bool batch = is_batch_file(cmd[0]);
+    if (batch) {
+      for (const auto& arg : cmd) {
+        if (arg.find_first_of("\"%!^&|<>()\r\n") != std::string::npos)
+          return "cannot pass '" + arg + "' to the batch file '" + cmd[0] + "'";
+      }
+    }
+
     SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, TRUE };
     HANDLE outRead, outWrite, errRead, errWrite;
     if (!CreatePipe(&outRead, &outWrite, &sa, 0))
@@ -212,28 +252,68 @@ private:
     for (const auto& arg : cmd) {
       if (!cmdline.empty())
         cmdline.push_back(L' ');
-      cmdline += quote_arg(base::from_utf8(arg));
+      // Every argument of a batch file is quoted, so cmd.exe doesn't
+      // split it at a comma, a semicolon or an equals sign
+      cmdline += quote_arg(base::from_utf8(arg), batch);
     }
     const std::wstring wcwd = base::from_utf8(cwd);
 
-    STARTUPINFOW si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = nul;
-    si.hStdOutput = outWrite;
-    si.hStdError = errWrite;
+    // The child inherits its standard handles and nothing else
+    HANDLE inherited[3];
+    DWORD inheritedCount = 0;
+    if (nul != INVALID_HANDLE_VALUE)
+      inherited[inheritedCount++] = nul;
+    inherited[inheritedCount++] = outWrite;
+    inherited[inheritedCount++] = errWrite;
+    SIZE_T attrSize = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
+    std::vector<char> attrBuf(attrSize);
+    auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrBuf.data());
+    BOOL ok = InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize) &&
+              UpdateProcThreadAttribute(attrs,
+                                        0,
+                                        PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                        inherited,
+                                        inheritedCount * sizeof(HANDLE),
+                                        nullptr,
+                                        nullptr);
+
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job) {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+      limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+    }
+
+    STARTUPINFOEXW si = {};
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = nul;
+    si.StartupInfo.hStdOutput = outWrite;
+    si.StartupInfo.hStdError = errWrite;
+    si.lpAttributeList = attrs;
     PROCESS_INFORMATION pi = {};
-    const BOOL ok = CreateProcessW(nullptr,
-                                   cmdline.data(),
-                                   nullptr,
-                                   nullptr,
-                                   TRUE,
-                                   CREATE_NO_WINDOW,
-                                   nullptr,
-                                   wcwd.empty() ? nullptr : wcwd.c_str(),
-                                   &si,
-                                   &pi);
-    const DWORD lastError = GetLastError();
+    // Suspended until it's in the job, so nothing it starts escapes
+    ok = ok && job &&
+         CreateProcessW(nullptr,
+                        cmdline.data(),
+                        nullptr,
+                        nullptr,
+                        TRUE,
+                        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
+                        nullptr,
+                        wcwd.empty() ? nullptr : wcwd.c_str(),
+                        &si.StartupInfo,
+                        &pi);
+    DWORD lastError = GetLastError();
+    if (ok && !AssignProcessToJobObject(job, pi.hProcess)) {
+      lastError = GetLastError();
+      TerminateProcess(pi.hProcess, 1);
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+      ok = FALSE;
+    }
+    DeleteProcThreadAttributeList(attrs);
     CloseHandle(outWrite);
     CloseHandle(errWrite);
     if (nul != INVALID_HANDLE_VALUE)
@@ -241,32 +321,56 @@ private:
     if (!ok) {
       CloseHandle(outRead);
       CloseHandle(errRead);
+      if (job)
+        CloseHandle(job);
       return "cannot start '" + cmd[0] + "' (error " + std::to_string(lastError) + ")";
     }
+    ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     m_process = pi.hProcess;
+    m_job = job;
 
     auto shared = this->shared;
     const HANDLE process = m_process;
     m_waiter = std::thread([shared, process, outRead, errRead]() {
-      auto reader = [](HANDLE h) {
-        return [h](char* buf, long size) -> long {
+      std::atomic<bool> ended = false;
+      // Reads until the pipe closes. Once the process ended, it reads
+      // what's left and stops, even if a process it started still
+      // holds the pipe.
+      auto read_pipe = [&ended, &shared](HANDLE h, Kind kind) {
+        std::string pending;
+        char buf[4096];
+        for (;;) {
+          if (ended) {
+            DWORD available = 0;
+            if (!PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr) || available == 0)
+              break;
+          }
           DWORD n = 0;
-          if (!ReadFile(h, buf, DWORD(size), &n, nullptr))
-            return 0;
-          return long(n);
-        };
+          if (ReadFile(h, buf, DWORD(sizeof(buf)), &n, nullptr)) {
+            pending.append(buf, n);
+            push_lines(shared, kind, pending);
+          }
+          else if (GetLastError() != ERROR_OPERATION_ABORTED)
+            break;
+        }
+        push_rest(shared, kind, pending);
       };
-      std::thread out([&]() { read_lines(shared, Kind::Stdout, reader(outRead)); });
-      std::thread err([&]() { read_lines(shared, Kind::Stderr, reader(errRead)); });
+      std::thread out([&]() { read_pipe(outRead, Kind::Stdout); });
+      std::thread err([&]() { read_pipe(errRead, Kind::Stderr); });
       WaitForSingleObject(process, INFINITE);
-      out.join();
-      err.join();
+      ended = true;
+      // Wakes a reader that waits for more output
+      for (std::thread* reader : { &out, &err }) {
+        const HANDLE h = reader->native_handle();
+        while (WaitForSingleObject(h, 10) == WAIT_TIMEOUT)
+          CancelSynchronousIo(h);
+        reader->join();
+      }
       CloseHandle(outRead);
       CloseHandle(errRead);
       DWORD code = 0;
       GetExitCodeProcess(process, &code);
-      shared->exited = true;
       Shared::push(shared, { Kind::Exit, std::string(), int(code) });
     });
     return std::string();
@@ -347,36 +451,126 @@ private:
       return "cannot start '" + cmd[0] + "': " + std::strerror(childErr);
     }
 
+    // The waiter tells the reader through this pipe that the process
+    // ended, and with which exit code
+    int endPipe[2];
+    if (pipe(endPipe) != 0) {
+      const int err = errno;
+      ::kill(-pid, SIGKILL);
+      close(outPipe[0]);
+      close(errPipe[0]);
+      waitpid(pid, nullptr, 0);
+      return std::strerror(err);
+    }
+    fcntl(endPipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(endPipe[1], F_SETFD, FD_CLOEXEC);
+
     m_pid = pid;
-    auto shared = this->shared;
-    const int outFd = outPipe[0];
-    const int errFd = errPipe[0];
-    m_waiter = std::thread([shared, pid, outFd, errFd]() {
-      auto reader = [](int fd) {
-        return [fd](char* buf, long size) -> long {
-          ssize_t n;
-          do {
-            n = read(fd, buf, size);
-          } while (n < 0 && errno == EINTR);
-          return long(n);
-        };
-      };
-      std::thread out([&]() { read_lines(shared, Kind::Stdout, reader(outFd)); });
-      std::thread err([&]() { read_lines(shared, Kind::Stderr, reader(errFd)); });
-      int status = 0;
-      while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-      shared->exited = true;
-      out.join();
-      err.join();
-      close(outFd);
-      close(errFd);
-      const int code = (WIFEXITED(status)   ? WEXITSTATUS(status) :
-                        WIFSIGNALED(status) ? 128 + WTERMSIG(status) :
-                                              -1);
-      Shared::push(shared, { Kind::Exit, std::string(), code });
+    const int endWrite = endPipe[1];
+    // waitid() with WNOWAIT leaves the process a zombie, so its ID and
+    // its process group stay its own until it's reaped, and stop()
+    // reaches what it left behind.
+    m_waiter = std::thread([pid, endWrite]() {
+      siginfo_t info = {};
+      while (waitid(P_PID, pid, &info, WEXITED | WNOWAIT) < 0 && errno == EINTR) {}
+      const int code = (info.si_code == CLD_EXITED ? info.si_status : 128 + info.si_status);
+      (void)!write(endWrite, &code, sizeof(code));
+      close(endWrite);
     });
+    m_reader = std::thread(
+      [shared = this->shared, pid, outFd = outPipe[0], errFd = errPipe[0], endRead = endPipe[0]]() {
+        read_until_end(shared, pid, outFd, errFd, endRead);
+      });
     return std::string();
   }
+
+  // Reads stdout and stderr until the process ends. Then it reads
+  // what's left and stops, even if a process it started still holds
+  // the pipes, and pushes the exit code.
+  static void read_until_end(const std::shared_ptr<Shared>& shared,
+                             const pid_t pid,
+                             const int outFd,
+                             const int errFd,
+                             const int endRead)
+  {
+    struct Stream {
+      int fd;
+      Kind kind;
+      std::string pending;
+      bool open = true;
+    };
+    Stream streams[2] = {
+      { outFd, Kind::Stdout },
+      { errFd, Kind::Stderr }
+    };
+    // Reads once, returns false at the end of the pipe or when nothing
+    // is there to read
+    auto read_some = [&shared](Stream& s) {
+      char buf[4096];
+      ssize_t n;
+      do {
+        n = read(s.fd, buf, sizeof(buf));
+      } while (n < 0 && errno == EINTR);
+      if (n <= 0) {
+        if (n == 0 || errno != EAGAIN)
+          s.open = false;
+        return false;
+      }
+      s.pending.append(buf, n);
+      push_lines(shared, s.kind, s.pending);
+      return true;
+    };
+
+    int code = -1;
+    for (bool ended = false; !ended;) {
+      pollfd fds[3];
+      Stream* polled[3] = {};
+      int count = 0;
+      for (auto& s : streams) {
+        if (s.open) {
+          fds[count] = { s.fd, POLLIN, 0 };
+          polled[count++] = &s;
+        }
+      }
+      fds[count++] = { endRead, POLLIN, 0 };
+      if (poll(fds, count, -1) < 0) {
+        if (errno == EINTR)
+          continue;
+        break;
+      }
+      for (int i = 0; i < count; ++i) {
+        if (!fds[i].revents)
+          continue;
+        if (polled[i])
+          read_some(*polled[i]);
+        else {
+          (void)!read(endRead, &code, sizeof(code));
+          ended = true;
+        }
+      }
+    }
+    close(endRead);
+
+    for (auto& s : streams) {
+      if (s.open) {
+        fcntl(s.fd, F_SETFL, fcntl(s.fd, F_GETFL) | O_NONBLOCK);
+        while (read_some(s)) {}
+      }
+      push_rest(shared, s.kind, s.pending);
+      close(s.fd);
+    }
+
+    // With the pipes closed by everyone, the zombie isn't needed for
+    // stop() anymore
+    if (!streams[0].open && !streams[1].open) {
+      std::lock_guard lock(shared->mutex);
+      while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
+      shared->reaped = true;
+    }
+    Shared::push(shared, { Kind::Exit, std::string(), code });
+  }
+
+  std::thread m_reader;
 
 #endif
 
@@ -391,7 +585,7 @@ void call_callback(lua_State* L, Process* process, const char* name, const Event
     if (ev.kind == Kind::Exit)
       lua_pushinteger(L, ev.code);
     else
-      lua_pushstring(L, ev.line.c_str());
+      lua_pushlstring(L, ev.line.data(), ev.line.size());
     if (lua_pcall(L, 1, 0, 0)) {
       if (const char* s = lua_tostring(L, -1))
         App::instance()->scriptEngine()->consolePrint(s);
@@ -404,13 +598,13 @@ void call_callback(lua_State* L, Process* process, const char* name, const Event
   lua_pop(L, 2); // Pop the uservalue and the process
 }
 
-// Hands the queued events to the Lua callbacks.
-void dispatch(Process* process)
+// Hands the queued events to the Lua callbacks, which run on the
+// given Lua thread.
+void dispatch(Process* process, lua_State* L)
 {
   if (process->dispatching || process->runningRef == LUA_REFNIL)
     return;
   process->dispatching = true;
-  lua_State* L = process->L;
   for (;;) {
     Event ev;
     {
@@ -442,6 +636,11 @@ void dispatch(Process* process)
   process->dispatching = false;
 }
 
+void dispatch_from_ui(Process* process)
+{
+  dispatch(process, process->L);
+}
+
 int Process_new(lua_State* L)
 {
   luaL_checktype(L, 1, LUA_TTABLE);
@@ -469,7 +668,9 @@ int Process_new(lua_State* L)
   lua_pop(L, 1);
 
   auto process = push_new<Process>(L);
-  process->L = L;
+  lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
+  process->L = lua_tothread(L, -1);
+  lua_pop(L, 1);
   process->cmd = std::move(cmd);
   process->cwd = std::move(cwd);
 
@@ -529,7 +730,7 @@ int Process_wait(lua_State* L)
       std::unique_lock lock(process->shared->mutex);
       process->shared->cv.wait(lock, [process] { return !process->shared->events.empty(); });
     }
-    dispatch(process);
+    dispatch(process, L);
   }
   if (process->started)
     lua_pushinteger(L, process->exitCode);

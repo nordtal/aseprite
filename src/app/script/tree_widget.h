@@ -33,6 +33,56 @@ struct TreeNode {
 };
 
 using TreeNodes = std::vector<std::unique_ptr<TreeNode>>;
+using TreeRows = std::vector<std::pair<TreeNode*, int>>; // Visible nodes and their depth
+
+// The nodes of a tree, its visible rows and its selection, without
+// the widget that paints them.
+class TreeModel {
+public:
+  // Replaces the children of the given node, or the root nodes if
+  // it's null. The selection survives if its node ID survives.
+  void setChildren(TreeNode* parent, TreeNodes&& children);
+
+  TreeNode* findNode(const std::string& id) const;
+
+  // Rebuilds the rows after the fields of a node were changed
+  // directly.
+  void nodeChanged();
+
+  const TreeRows& rows() const { return m_rows; }
+
+  TreeNode* selected() const { return m_selected; }
+  void setSelected(TreeNode* node);
+
+  // What the user does. Each one fires the events of its change, and
+  // a callback may replace any node, the given one too.
+  void select(TreeNode* node);
+  void toggle(TreeNode* node);
+  void contextMenu(TreeNode* node);
+
+  // Events from the user, programmatic changes don't fire them.
+  obs::signal<void(TreeNode*)> Change;
+  obs::signal<void(TreeNode*, bool)> Expand;
+  obs::signal<void(TreeNode*)> ContextMenu;
+
+  // The rows changed
+  obs::signal<void()> RowsChange;
+  // The row at the given index has to be visible
+  obs::signal<void(int)> ShowRow;
+
+private:
+  void unindex(TreeNode* node, std::map<std::string, bool>& oldExpanded);
+  void index(TreeNode* node, const std::map<std::string, bool>& oldExpanded);
+  void addRows(const TreeNodes& nodes, int depth);
+  TreeNode* again(TreeNode* node, const std::string& id, int generation) const;
+
+  TreeNodes m_nodes;
+  std::map<std::string, TreeNode*> m_byId;
+  TreeRows m_rows;
+  TreeNode* m_selected = nullptr;
+  // Counts the calls to setChildren(), which free nodes
+  int m_generation = 0;
+};
 
 // A scrollable tree of nodes with a label, an icon and a badge each.
 class Tree : public ui::View {
@@ -41,43 +91,17 @@ public:
 
   Tree();
 
-  // Replaces the children of the given node, or the root nodes if
-  // it's null. The selection survives if its node ID survives.
-  void setChildren(TreeNode* parent, TreeNodes&& children);
-
-  TreeNode* findNode(const std::string& id) const;
-
-  // Relayouts and repaints the tree after the fields of a node were
-  // changed directly.
-  void nodeChanged();
-
-  TreeNode* selected() const { return m_selected; }
-  void setSelected(TreeNode* node);
-
-  // Events from the user, programmatic changes don't generate them.
-  obs::signal<void(TreeNode*)> Change;
-  obs::signal<void(TreeNode*, bool)> Expand;
-  obs::signal<void(TreeNode*)> ContextMenu;
+  TreeModel& model() { return m_model; }
+  const TreeModel& model() const { return m_model; }
 
 protected:
   void onSizeHint(ui::SizeHintEvent& ev) override;
 
 private:
   class Content;
-  friend class Content;
 
-  void unindex(TreeNode* node, std::map<std::string, bool>& oldExpanded);
-  void index(TreeNode* node, const std::map<std::string, bool>& oldExpanded);
-  void rebuildRows();
-  void addRows(const TreeNodes& nodes, int depth);
-  void toggle(TreeNode* node);
-  void select(TreeNode* node);
-
+  TreeModel m_model;
   Content* m_content;
-  TreeNodes m_nodes;
-  std::map<std::string, TreeNode*> m_byId;
-  std::vector<std::pair<TreeNode*, int>> m_rows; // Visible nodes and their depth
-  TreeNode* m_selected = nullptr;
 };
 
 }} // namespace app::script
