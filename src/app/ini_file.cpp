@@ -46,7 +46,7 @@ ConfigModule::ConfigModule()
   if (!base::is_file(fn) && App::instance() && App::instance()->isGui()) {
     try {
       const std::string to = base::get_file_path(fn);
-      const std::string from = find_aseprite_settings(to);
+      const std::string from = find_aseprite_settings(aseprite_settings_dir(), to);
       if (!from.empty() && ask_to_import_aseprite_settings(from))
         import_aseprite_settings(from, to);
     }

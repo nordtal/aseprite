@@ -12,28 +12,18 @@
 #include "cfg/cfg.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 
 using namespace app;
 
 namespace {
 
-void remove_tree(const std::string& path)
-{
-  if (base::is_directory(path)) {
-    for (const auto& item : base::list_files(path))
-      remove_tree(base::join_path(path, item));
-    base::remove_directory(path);
-  }
-  else if (base::is_file(path))
-    base::delete_file(path);
-}
-
 // An empty directory in the temp folder for one test
 std::string fresh_dir(const std::string& name)
 {
   const std::string dir = base::join_path(base::get_temp_path(), "settings_import_tests_" + name);
-  remove_tree(dir);
+  std::filesystem::remove_all(std::filesystem::u8path(dir));
   base::make_all_directories(dir);
   return dir;
 }
@@ -145,4 +135,70 @@ TEST(SettingsImport, RefusesToCopyADirectoryOntoItself)
   EXPECT_EQ("[general]\nscreen_scale = 2\n", read(from, "aseprite.ini"));
   EXPECT_EQ("GIMP Palette\n", read(from, "palettes/a.gpl"));
   std::filesystem::remove(link, ec);
+}
+
+TEST(SettingsImport, AFailedCopyLeavesNoScriptAccessBehind)
+{
+  const std::string from = fresh_dir("from");
+  const std::string to = fresh_dir("to");
+  write(from, "aseprite.ini", "[general]\nscreen_scale = 2\n[script_access]\n0123 = 1\n");
+  write(from, "palettes/a.gpl", "GIMP Palette\n");
+
+  // A palette that can't be read makes the copy fail after aseprite.ini
+  const std::string locked = base::join_path(from, "palettes/a.gpl");
+  std::filesystem::permissions(locked, std::filesystem::perms::none);
+  if (std::FILE* f = std::fopen(locked.c_str(), "rb")) {
+    // Root reads it anyway
+    std::fclose(f);
+    std::filesystem::permissions(locked, std::filesystem::perms::owner_all);
+    GTEST_SKIP();
+  }
+
+  EXPECT_ANY_THROW(import_aseprite_settings(from, to));
+  std::filesystem::permissions(locked, std::filesystem::perms::owner_all);
+
+  // Nothing landed, so nothing of script_access either
+  EXPECT_TRUE(base::list_files(to).empty());
+}
+
+TEST(SettingsImport, RefusesATargetInsideTheSource)
+{
+  const std::string from = fresh_dir("outer");
+  write(from, "aseprite.ini", "[general]\nscreen_scale = 2\n");
+  write(from, "palettes/a.gpl", "GIMP Palette\n");
+  const std::string to = base::join_path(from, "palettes/inner");
+
+  EXPECT_FALSE(import_aseprite_settings(from, to));
+  EXPECT_FALSE(base::is_directory(to));
+}
+
+TEST(SettingsImport, LeavesDirectorySymlinksBehind)
+{
+  const std::string from = fresh_dir("from");
+  const std::string to = fresh_dir("to");
+  write(from, "palettes/a.gpl", "GIMP Palette\n");
+  std::error_code ec;
+  std::filesystem::create_directory_symlink(base::join_path(from, "palettes"),
+                                            base::join_path(from, "palettes/loop"),
+                                            ec);
+  if (ec)
+    GTEST_SKIP();
+
+  EXPECT_TRUE(import_aseprite_settings(from, to));
+  EXPECT_EQ("GIMP Palette\n", read(to, "palettes/a.gpl"));
+  EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(
+    std::filesystem::u8path(base::join_path(to, "palettes/loop")))));
+}
+
+TEST(SettingsImport, FindsOnlyAnotherDirectoryWithSettings)
+{
+  const std::string from = fresh_dir("found");
+  const std::string to = fresh_dir("to");
+  EXPECT_EQ("", find_aseprite_settings(from, to));
+  EXPECT_EQ("", find_aseprite_settings("", to));
+
+  write(from, "aseprite.ini", "[general]\n");
+  EXPECT_EQ(from, find_aseprite_settings(from, to));
+  EXPECT_EQ("", find_aseprite_settings(from, from));
+  EXPECT_EQ("", find_aseprite_settings(from, base::join_path(from, "inner")));
 }

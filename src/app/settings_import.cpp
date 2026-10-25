@@ -32,27 +32,63 @@ static const char* kSettings[] = { "aseprite.ini", "user.aseprite-keys", "palett
 // folders, and the access granted to scripts in Aseprite
 static const char* kDroppedSections[] = { "RecentFiles", "RecentPaths", "script_access" };
 
+namespace fs = std::filesystem;
+
 // True if both paths are the same directory, through a symlink or an
 // ASEPRITE_USER_FOLDER too. Copying it onto itself would empty its files.
 static bool same_directory(const std::string& a, const std::string& b)
 {
   std::error_code ec;
-  return std::filesystem::equivalent(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+  return fs::equivalent(fs::u8path(a), fs::u8path(b), ec);
 }
 
-static void copy_tree(const std::string& from, const std::string& to)
+// True if path is dir or lies inside it, after resolving symlinks
+static bool inside(const std::string& dir, const std::string& path)
 {
-  if (base::is_directory(from)) {
-    base::make_all_directories(to);
-    for (const auto& item : base::list_files(from))
-      copy_tree(base::join_path(from, item), base::join_path(to, item));
+  std::error_code ec;
+  const fs::path d = fs::weakly_canonical(fs::u8path(dir), ec);
+  if (ec || d.empty())
+    return false;
+  const fs::path p = fs::weakly_canonical(fs::u8path(path), ec);
+  if (ec)
+    return false;
+  auto it = p.begin();
+  for (const auto& part : d) {
+    if (part.empty())
+      continue;
+    if (it == p.end() || *it != part)
+      return false;
+    ++it;
   }
-  else {
-    base::copy_file(from, to, true);
+  return true;
+}
+
+// The import into "to" copies nothing onto itself or into itself
+static bool can_import(const std::string& from, const std::string& to)
+{
+  return !same_directory(from, to) && !inside(from, to);
+}
+
+// Copies a file or a directory. A symlink to a file is copied as the
+// file, and one to a directory isn't followed, so a loop ends.
+static void copy_tree(const fs::path& from, const fs::path& to)
+{
+  const fs::file_status st = fs::symlink_status(from);
+  if (fs::is_symlink(st)) {
+    if (fs::is_regular_file(fs::status(from)))
+      fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+  }
+  else if (fs::is_directory(st)) {
+    fs::create_directories(to);
+    for (const auto& entry : fs::directory_iterator(from))
+      copy_tree(entry.path(), to / entry.path().filename());
+  }
+  else if (fs::is_regular_file(st)) {
+    fs::copy_file(from, to, fs::copy_options::overwrite_existing);
   }
 }
 
-std::string find_aseprite_settings(const std::string& to)
+std::string aseprite_settings_dir()
 {
   std::string dir;
 #if LAF_WINDOWS
@@ -63,9 +99,14 @@ std::string find_aseprite_settings(const std::string& to)
   // $HOME/Library/Application Support/Aseprite
   dir = base::join_path(base::get_lib_app_support_path(), "Aseprite");
 #endif
-  if (dir.empty() || !has_aseprite_settings(dir) || same_directory(dir, to))
-    return std::string();
   return dir;
+}
+
+std::string find_aseprite_settings(const std::string& from, const std::string& to)
+{
+  if (from.empty() || !has_aseprite_settings(from) || !can_import(from, to))
+    return std::string();
+  return from;
 }
 
 bool has_aseprite_settings(const std::string& dir)
@@ -80,22 +121,44 @@ bool has_aseprite_settings(const std::string& dir)
 
 bool import_aseprite_settings(const std::string& from, const std::string& to)
 {
-  if (same_directory(from, to))
+  if (!can_import(from, to))
     return false;
 
-  for (const char* item : kSettings) {
-    const std::string path = base::join_path(from, item);
-    if (base::is_file(path) || base::is_directory(path))
-      copy_tree(path, base::join_path(to, item));
-  }
+  // Everything is copied and filtered next to the target first, and
+  // moved into place once it's complete, so a failed copy leaves
+  // nothing, and no script_access, behind
+  const fs::path target = fs::u8path(to);
+  const fs::path stage = target / ".settings-import";
+  fs::remove_all(stage);
+  try {
+    fs::create_directories(stage);
+    for (const char* item : kSettings) {
+      const fs::path path = fs::u8path(from) / item;
+      if (fs::exists(path))
+        copy_tree(path, stage / item);
+    }
 
-  const std::string ini = base::join_path(to, "aseprite.ini");
-  if (base::is_file(ini)) {
-    cfg::CfgFile cfg;
-    cfg.load(ini);
-    for (const char* section : kDroppedSections)
-      cfg.deleteSection(section);
-    cfg.save();
+    const fs::path ini = stage / "aseprite.ini";
+    if (fs::is_regular_file(ini)) {
+      cfg::CfgFile cfg;
+      cfg.load(ini.u8string());
+      for (const char* section : kDroppedSections)
+        cfg.deleteSection(section);
+      cfg.save();
+    }
+
+    for (const char* item : kSettings) {
+      if (!fs::exists(fs::symlink_status(stage / item)))
+        continue;
+      fs::remove_all(target / item);
+      fs::rename(stage / item, target / item);
+    }
+    fs::remove_all(stage);
+  }
+  catch (...) {
+    std::error_code ec;
+    fs::remove_all(stage, ec);
+    throw;
   }
   return true;
 }
