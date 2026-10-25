@@ -213,8 +213,12 @@ private:
     return out;
   }
 
-  static bool is_batch_file(const std::string& program)
+  static bool is_batch_file(std::string program)
   {
+    // Windows drops trailing dots and spaces from a file name, so
+    // "run.bat. " runs run.bat
+    while (!program.empty() && (program.back() == '.' || program.back() == ' '))
+      program.pop_back();
     std::string ext = program.substr(program.size() < 4 ? 0 : program.size() - 4);
     for (char& c : ext)
       c = char(std::tolower((unsigned char)c));
@@ -274,7 +278,8 @@ private:
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
     std::vector<char> attrBuf(attrSize);
     auto attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrBuf.data());
-    BOOL ok = InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize) &&
+    const BOOL attrsReady = InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize);
+    BOOL ok = attrsReady &&
               UpdateProcThreadAttribute(attrs,
                                         0,
                                         PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
@@ -318,7 +323,8 @@ private:
       CloseHandle(pi.hProcess);
       ok = FALSE;
     }
-    DeleteProcThreadAttributeList(attrs);
+    if (attrsReady)
+      DeleteProcThreadAttributeList(attrs);
     CloseHandle(outWrite);
     CloseHandle(errWrite);
     if (nul != INVALID_HANDLE_VALUE)
