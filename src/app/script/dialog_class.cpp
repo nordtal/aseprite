@@ -1787,7 +1787,9 @@ int Dialog_modify(lua_State* L)
         dlg->window.setText(s);
         if (dlg->tab) {
           dlg->tab->setText(s);
-          App::instance()->workspace()->updateTabs();
+          // The workspace is gone while the app ends
+          if (Workspace* workspace = App::instance()->workspace())
+            workspace->updateTabs();
         }
         relayout = true;
       }

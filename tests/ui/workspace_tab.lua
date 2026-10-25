@@ -95,6 +95,13 @@ ui_test(function()
   assert(app.sprite == spr)
   assert(dlg.data.editor == spr)
 
+  -- A tab that renames itself when it closes still does so while the
+  -- app ends, after the main window is gone
+  local renamed
+  renamed = Dialog{ title="Rename", tab=true,
+                    onclose=function() renamed:modify{ title="Closed" } end }
+  renamed:show()
+
   -- The events of a change the script didn't make arrive after it
   assert(changes == 0)
   return function()
