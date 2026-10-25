@@ -1,0 +1,16 @@
+{
+  "name": "nordtal-bootstrap",
+  "displayName": "Nordtal Bootstrap",
+  "description": "Signs in to GitHub, clones the season repository and loads its plugin",
+  "version": "1.0",
+  "author": { "name": "Nordtal", "url": "https://nordtal.eu" },
+  "publisher": "nordtal",
+  "categories": [
+    "Scripts"
+  ],
+  "contributes": {
+    "scripts": [
+      { "path": "./bootstrap.lua" }
+    ]
+  }
+}
