@@ -43,3 +43,12 @@ local function f() return debug.getinfo(2, "fS") end
 local info = f()
 assert(info.func == nil and info.source:find("security.lua", 1, true))
 assert(debug.getinfo(print, "f").func == print)
+
+-- The error for a field an object lacks has the traceback, then the
+-- name of the field
+local ok, msg = pcall(function() return r.nope end)
+assert(not ok and msg:find("^[^\n]*stack traceback") and
+       msg:find("Field 'nope' does not exist", 1, true), msg)
+ok, msg = pcall(function() r.nope = 1 end)
+assert(not ok and msg:find("^[^\n]*stack traceback") and
+       msg:find("Cannot set field 'nope'", 1, true), msg)
