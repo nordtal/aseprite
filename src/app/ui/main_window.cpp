@@ -33,6 +33,7 @@
 #include "app/ui/main_menu_bar.h"
 #include "app/ui/notifications.h"
 #include "app/ui/preview_editor.h"
+#include "app/ui/side_panel.h"
 #include "app/ui/skin/skin_property.h"
 #include "app/ui/skin/skin_theme.h"
 #include "app/ui/status_bar.h"
@@ -183,6 +184,14 @@ void MainWindow::initialize()
   m_saveDockLayoutConn = m_customizableDock->UserResizedDock.connect(&MainWindow::saveActiveLayout,
                                                                      this);
 
+  // The side panel follows the colour bar to the other side, and
+  // keeps the width the user gives it
+  m_customizedDockConn = m_customizableDock->UserResizedDock.connect([this] { updateSidePanel(); });
+  m_sidePanelResizeConn = m_dock->UserResizedDock.connect([this] {
+    if (m_sidePanel)
+      m_sidePanel->setWidth(m_sidePanel->bounds().w / guiscale());
+  });
+
   // Reconfigure workspace when the timeline position is changed.
   auto& pref = Preferences::instance();
   pref.general.timelinePosition.AfterChange.connect([this] { configureWorkspaceLayout(); });
@@ -205,8 +214,11 @@ MainWindow::~MainWindow()
   m_timelineResizeConn.disconnect();
   m_colorBarResizeConn.disconnect();
   m_saveDockLayoutConn.disconnect();
+  m_customizedDockConn.disconnect();
+  m_sidePanelResizeConn.disconnect();
 
   m_dock->resetDocks();
+  m_sidePanel = nullptr;
   m_customizableDock->resetDocks();
 
   // Leaving them in can cause crashes when cleaning up.
@@ -479,12 +491,50 @@ void MainWindow::loadUserLayout(const Layout* layout)
     setDefaultLayout();
   }
 
+  updateSidePanel();
   this->layout();
 }
 
 void MainWindow::setCustomizeDock(bool enable)
 {
   m_customizableDock->setCustomizing(enable);
+}
+
+void MainWindow::updateSidePanel()
+{
+  if (!m_dock || !m_workspace)
+    return;
+
+  SidePanel* panel = nullptr;
+  if (m_mode == NormalMode) {
+    if (WorkspaceView* view = m_workspace->activeView())
+      panel = view->sidePanel();
+  }
+
+  if (m_sidePanel)
+    m_dock->undock(m_sidePanel);
+  m_sidePanel = panel;
+
+  if (panel) {
+    // Outside the colour bar, wherever the layout docks it
+    const bool mirrored = (Dock::GetSide(m_colorBar.get()) == ui::RIGHT);
+    const int side = ((panel->side() == ui::LEFT) != mirrored ? ui::LEFT : ui::RIGHT);
+    gfx::Size size(panel->width() * guiscale(), 0);
+    if (size.w <= 0)
+      size.w = panel->sizeHint().w;
+    m_dock->dock(side, panel, size);
+  }
+
+  layout();
+  invalidate();
+}
+
+void MainWindow::removeSidePanel(SidePanel* panel)
+{
+  if (m_sidePanel == panel) {
+    m_dock->undock(panel);
+    m_sidePanel = nullptr;
+  }
 }
 
 void MainWindow::dataRecoverySessionsAreReady()
@@ -770,7 +820,7 @@ void MainWindow::configureWorkspaceLayout()
     m_contextBar->updateForActiveTool();
   }
 
-  layout();
+  updateSidePanel();
 }
 
 void MainWindow::saveTimelineConfiguration()

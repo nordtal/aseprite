@@ -170,6 +170,10 @@ struct Dialog {
   // Set once close_all_dialogs() closed it.
   bool closedAtExit = false;
 
+  // The grid of the side panel of a Dialog{ tab=true }, which holds
+  // the widgets added after Dialog:panel{}.
+  ui::Grid* panelGrid = nullptr;
+
   Dialog(const ui::Window::Type windowType, const std::string& title, bool sizeable)
     : window(windowType, title)
     , currentGrid(window.grid())
@@ -1662,6 +1666,64 @@ int Dialog_editor(lua_State* L)
   return Dialog_add_widget(L, slot);
 }
 
+int get_panel_side(lua_State* L, int index)
+{
+  static const char* const sides[] = { "left", "right", nullptr };
+  return (luaL_checkoption(L, index, nullptr, sides) == 0 ? ui::LEFT : ui::RIGHT);
+}
+
+void update_side_panel(Dialog* dlg)
+{
+  // The main window docks the panel while its tab is open
+  if (dlg->tab->parent())
+    App::instance()->mainWindow()->updateSidePanel();
+}
+
+int Dialog_panel(lua_State* L)
+{
+  auto dlg = get_obj<Dialog>(L, 1);
+  if (!dlg->tab)
+    return luaL_error(L, "Dialog:panel{} needs a Dialog{ tab=true }");
+  if (dlg->tab->sidePanel())
+    return luaL_error(L, "a Dialog has one side panel at most");
+
+  // Read before the panel exists, as it can raise an error
+  int side = ui::LEFT;
+  int width = 0;
+  const char* id = nullptr;
+  if (lua_istable(L, 2)) {
+    if (lua_getfield(L, 2, "side") != LUA_TNIL)
+      side = get_panel_side(L, -1);
+    lua_pop(L, 1);
+    if (lua_getfield(L, 2, "width") != LUA_TNIL)
+      width = lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    if (lua_getfield(L, 2, "id") == LUA_TSTRING)
+      id = lua_tostring(L, -1);
+    lua_pop(L, 1);
+  }
+
+  SidePanel* panel = dlg->tab->makeSidePanel();
+  if (id) {
+    panel->setId(id);
+    dlg->dataWidgets[id] = panel;
+  }
+  panel->setSide(side);
+  panel->setDefaultWidth(width);
+
+  // The widgets from here on go into the panel
+  auto grid = new ui::Grid(2, false);
+  grid->setExpansive(true);
+  panel->addChild(grid);
+  dlg->panelGrid = grid;
+  dlg->currentGrid = grid;
+  dlg->hbox = nullptr;
+
+  update_side_panel(dlg);
+  lua_pushvalue(L, 1);
+  return 1;
+}
+
 int Dialog_tab(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
@@ -1765,7 +1827,7 @@ int Dialog_endtabs(lua_State* L)
   dlg->wipTab->selectTab(selectedTab);
 
   auto newTab = dlg->wipTab;
-  dlg->currentGrid = dlg->window.grid();
+  dlg->currentGrid = (dlg->panelGrid ? dlg->panelGrid : dlg->window.grid());
   dlg->wipTab = nullptr;
 
   return Dialog_add_widget(L, newTab);
@@ -1982,6 +2044,17 @@ int Dialog_modify(lua_State* L)
     }
     lua_pop(L, 1);
 
+    if (dlg->tab && widget == dlg->tab->sidePanel()) {
+      auto panel = static_cast<SidePanel*>(widget);
+      if (lua_getfield(L, 2, "side") != LUA_TNIL)
+        panel->setSide(get_panel_side(L, -1));
+      lua_pop(L, 1);
+      if (lua_getfield(L, 2, "width") != LUA_TNIL)
+        panel->setWidth(lua_tointeger(L, -1));
+      lua_pop(L, 1);
+      relayout = true;
+    }
+
     type = lua_getfield(L, 2, "sprite");
     if (type != LUA_TNIL && dlg->tab && widget == dlg->tab->editorSlot()) {
       dlg->tab->setDocument(get_editor_doc(L, -1));
@@ -1998,6 +2071,8 @@ int Dialog_modify(lua_State* L)
     if (relayout && dlg->tab) {
       dlg->tab->layout();
       dlg->tab->invalidate();
+      if (dlg->tab->sidePanel())
+        update_side_panel(dlg);
     }
     else if (relayout && !dlg->window.isResizing()) {
       gfx::Rect prelayoutBounds = dlg->window.bounds();
@@ -2084,6 +2159,8 @@ int Dialog_repaint(lua_State* L)
   auto dlg = get_obj<Dialog>(L, 1);
   std::stack<ui::Widget*> widgets;
   widgets.push(dlg->window.grid());
+  if (dlg->panelGrid)
+    widgets.push(dlg->panelGrid);
 
   while (!widgets.empty()) {
     auto child = widgets.top();
@@ -2304,6 +2381,11 @@ int Dialog_set_data(lua_State* L)
 int Dialog_get_bounds(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
+  // An open tab is where it shows in the main window
+  if (dlg->tab && dlg->tab->parent()) {
+    push_new<gfx::Rect>(L, dlg->tab->bounds());
+    return 1;
+  }
   if (!dlg->window.isVisible() && dlg->window.bounds().isEmpty() && dlg->window.isAutoRemap()) {
     dlg->window.remapWindow();
     dlg->window.centerWindow(dlg->parentDisplay());
@@ -2374,6 +2456,7 @@ const luaL_Reg Dialog_methods[] = {
   { "canvas",    Dialog_canvas    },
   { "tree",      Dialog_tree      },
   { "editor",    Dialog_editor    },
+  { "panel",     Dialog_panel     },
   { "tab",       Dialog_tab       },
   { "endtabs",   Dialog_endtabs   },
   { "modify",    Dialog_modify    },

@@ -25,6 +25,14 @@
 // 4: app.fs.removeTree(), require() in a trusted chunk of a file and
 //    plugin.require() of the season plugin
 // 5: Dialog:tree{ width } and Dialog:modify{ id, width } of a tree
-#define FORK_API_VERSION 5
+// 6: Dialog:panel{ id, side, width }, after which the widgets of a
+//    Dialog{ tab=true } go into a side panel. The main window docks
+//    it at its far edge while the tab is active: side="left" (the
+//    default) is outside the colour bar, side="right" outside the
+//    tools, both mirrored with the layout. width is in points, and a
+//    panel with an id keeps the width the user drags it to across
+//    restarts. Dialog:modify{ id, side, width } of the panel, and
+//    Dialog.bounds of an open tab is the tab's place in the window.
+#define FORK_API_VERSION 6
 
 #endif
