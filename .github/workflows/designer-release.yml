@@ -57,14 +57,23 @@ jobs:
       run: ninja -C build aseprite
     - name: Package
       run: |
+        # A package of a tag knows the tag and updates itself to newer
+        # releases; a manual run's doesn't
+        release() {
+          if [[ "${{ github.event_name }}" == "push" ]] ; then
+            echo "$GITHUB_REF_NAME" > "$1/extensions/nordtal-bootstrap/release"
+          fi
+        }
         if [[ "${{ runner.os }}" == "macOS" ]] ; then
           bash misc/designer/fetch-tools.sh macos "build/bin/Nordtal Designer.app/Contents/Resources/data"
+          release "build/bin/Nordtal Designer.app/Contents/Resources/data"
           ditto -c -k --keepParent "build/bin/Nordtal Designer.app" "${{ env.PACKAGE }}"
         else
           mkdir -p "package/Nordtal Designer"
           cp "build/bin/Nordtal Designer.exe" "package/Nordtal Designer/"
           cp -r build/bin/data "package/Nordtal Designer/"
           bash misc/designer/fetch-tools.sh windows "package/Nordtal Designer/data"
+          release "package/Nordtal Designer/data"
           cd package && 7z a "../${{ env.PACKAGE }}" "Nordtal Designer"
         fi
     - uses: actions/upload-artifact@v7

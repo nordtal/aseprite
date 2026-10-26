@@ -15,15 +15,18 @@
 local app, Process, json = app, Process, json
 local ipairs, pairs, pcall, setmetatable, tonumber, tostring, type =
       ipairs, pairs, pcall, setmetatable, tonumber, tostring, type
-local find, gsub, lower, match = string.find, string.gsub, string.lower, string.match
+local find, gmatch, gsub, lower, match =
+      string.find, string.gmatch, string.gsub, string.lower, string.match
 local concat, insert = table.concat, table.insert
+local max = math.max
 local getinfo = debug.getinfo
 local lines = io.lines
 local getenv, remove, rename = os.getenv, os.remove, os.rename
 local fs = app.fs
-local joinPath, isFile, isDirectory = fs.joinPath, fs.isFile, fs.isDirectory
+local joinPath, filePath, isFile, isDirectory = fs.joinPath, fs.filePath, fs.isFile, fs.isDirectory
 local listFiles, makeAllDirectories, removeTree =
       fs.listFiles, fs.makeAllDirectories, fs.removeTree
+local open = io.open
 local windows, macos, arm64 = app.os.windows, app.os.macos, app.os.arm64
 
 local season = {}
@@ -384,6 +387,245 @@ function season.java(clone, done)
     end)
   end)
   return s
+end
+
+-- The designer's own releases. A tag is v<aseprite version>-designer.<n>,
+-- and the release workflow writes it into the file release next to this
+-- one. A build without that file, as every build but a release is,
+-- never updates.
+season.repo = season.org .. "/aseprite"
+season.release = nil
+do
+  local ok, it = pcall(lines, joinPath(dir, "release"))
+  if ok then
+    for line in it do
+      local tag = match(line, "^%s*(.-)%s*$")
+      if tag ~= "" then season.release = tag end
+      break
+    end
+  end
+end
+
+-- The release asset that runs on this computer, the app it replaces
+-- (the bundle on macOS, the folder on Windows) and the name of that
+-- app inside the package
+season.package = (macos and arm64 and "Nordtal-Designer-macOS-arm64.zip") or
+                 (windows and "Nordtal-Designer-Windows-x64.zip") or nil
+if macos then
+  season.target = match(fs.appPath, "^(.+%.app)/Contents/MacOS/[^/]+$")
+elseif windows then
+  season.target = filePath(fs.appPath)
+end
+local packaged = windows and "Nordtal Designer" or "Nordtal Designer.app"
+local packagedExe = windows and joinPath(packaged, "Nordtal Designer.exe")
+                             or joinPath(packaged, "Contents", "MacOS", "Nordtal Designer")
+
+-- The numbers of the Aseprite version and the designer's number of a
+-- tag, or nil
+local function parseTag(tag)
+  if type(tag) ~= "string" then return nil end
+  local version, n = match(tag, "^v([%d%.]+)%-designer%.(%d+)$")
+  if not version or find(version, "..", 1, true) or find(version, "^%.") or
+     find(version, "%.$") then
+    return nil
+  end
+  local numbers = {}
+  for part in gmatch(version, "%d+") do insert(numbers, tonumber(part)) end
+  return { numbers=numbers, n=tonumber(n) }
+end
+
+-- true if tag a is a newer release than tag b. A missing number of the
+-- Aseprite version counts as 0.
+function season.newer(a, b)
+  local x, y = parseTag(a), parseTag(b)
+  if not x or not y then return false end
+  for i = 1, max(#x.numbers, #y.numbers) do
+    local p, q = x.numbers[i] or 0, y.numbers[i] or 0
+    if p ~= q then return p > q end
+  end
+  return x.n > y.n
+end
+
+-- The update to the latest release, as GitHub's API describes it, from
+-- the app's tag current: { tag, asset, sha256 }, or nil if it isn't
+-- newer or has no package with a sha256 for this computer
+function season.updateFrom(latest, current, package)
+  if type(latest) ~= "table" or latest.draft or latest.prerelease or not package or
+     not season.newer(latest.tag_name, current) or type(latest.assets) ~= "table" then
+    return nil
+  end
+  for _, asset in ipairs(latest.assets) do
+    if type(asset) == "table" and asset.name == package then
+      local sum = match(tostring(asset.digest), "^sha256:(%x+)$")
+      if sum and #sum == 64 then
+        return { tag=latest.tag_name, asset=package, sha256=lower(sum) }
+      end
+    end
+  end
+end
+
+-- done(update, err) with the update to the latest release, or nil.
+-- A build without a tag or a package doesn't ask and returns nil.
+function season.latestUpdate(done)
+  if not season.release or not season.package then
+    done(nil)
+    return
+  end
+  return (run({ gh, "api", "repos/" .. season.repo .. "/releases/latest" },
+              function(code, out, err)
+                if code ~= 0 then
+                  done(nil, err)
+                  return
+                end
+                -- The release as the plain tables that updateFrom() takes
+                local ok, latest = pcall(json.decode, concat(out, "\n"))
+                if ok then
+                  ok, latest = pcall(function()
+                    local assets = {}
+                    for _, asset in ipairs(latest.assets) do
+                      insert(assets, { name=asset.name, digest=asset.digest })
+                    end
+                    return { tag_name=latest.tag_name, draft=latest.draft,
+                             prerelease=latest.prerelease, assets=assets }
+                  end)
+                end
+                done(ok and season.updateFrom(latest, season.release, season.package) or nil)
+              end))
+end
+
+-- Moves the app at target to old and the one at staged in its place;
+-- if that fails, the old app goes back. true, or nil and the reason.
+function season.replace(staged, target, old)
+  if not removeTree(old) then
+    return nil, old .. " could not be removed"
+  end
+  if not isDirectory(staged) then
+    return nil, "there is no " .. staged
+  end
+  if not rename(target, old) then
+    return nil, target .. " could not be moved"
+  end
+  if not rename(staged, target) then
+    rename(old, target)
+    return nil, staged .. " could not be moved to " .. target
+  end
+  removeTree(old)
+  return true
+end
+
+-- The batch file that replaces the app folder target with staged on
+-- Windows. It waits until the folder can be moved, which it can once
+-- the app has quit, and moves the old folder back if the new one can't
+-- take its place. Returns nil and the reason for a path that cmd would
+-- expand.
+function season.windowsHelper(target, staged, old)
+  for _, path in ipairs({ target, staged, old }) do
+    if find(path, "%", 1, true) then
+      return nil, path .. " has a % in it, which the installer can't use"
+    end
+  end
+  return (concat({
+    "@echo off",
+    "chcp 65001 >nul",
+    "rem Nordtal Designer puts its new version in place once it has quit",
+    'set "target=' .. target .. '"',
+    'set "staged=' .. staged .. '"',
+    'set "old=' .. old .. '"',
+    ":wait",
+    'move "%target%" "%old%" >nul 2>&1',
+    "if errorlevel 1 (",
+    "  ping -n 2 127.0.0.1 >nul",
+    "  goto wait",
+    ")",
+    'move "%staged%" "%target%" >nul 2>&1',
+    'if errorlevel 1 move "%old%" "%target%" >nul 2>&1',
+    'rmdir /s /q "%old%" 2>nul',
+    "" }, "\r\n"))
+end
+
+-- The batch file an install on Windows leaves for the app's exit
+local pendingHelper
+
+-- Installs the update in place of the app at target. The package
+-- comes through gh, is checked against the release's sha256 and is
+-- unpacked into a folder next to the app, so the new app moves into
+-- place without a copy. On macOS it replaces the app at once and
+-- loses the quarantine attribute, as the first install does; on
+-- Windows season.finishInstall() starts the helper that replaces it
+-- when the app exits. done(ok, err). Returns the steps, or nil if done
+-- was called already.
+function season.install(update, target, done)
+  local work = joinPath(filePath(target), ".nordtal-designer-update")
+  local zip = joinPath(work, update.asset)
+  local staged = joinPath(work, packaged)
+  local old = joinPath(work, "old")
+  local function fail(err)
+    removeTree(work)
+    done(false, err)
+  end
+  if not removeTree(work) then
+    done(false, { work .. " could not be removed" })
+    return
+  end
+  makeAllDirectories(work)
+  local s = steps()
+  s.run({ gh, "release", "download", update.tag, "--repo", season.repo,
+          "--pattern", update.asset, "--dir", work }, function(code, out, err)
+    if code ~= 0 then
+      fail(err)
+      return
+    end
+    s.run(sha256(zip), function(code, out, err)
+      if parseSha256(out) ~= update.sha256 then
+        fail({ "the download of " .. update.tag .. " doesn't match its checksum" })
+        return
+      end
+      local unpack = windows and { tar, "-xf", zip, "-C", work }
+                              or { "/usr/bin/ditto", "-x", "-k", zip, work }
+      s.run(unpack, function(code, out, err)
+        remove(zip)
+        if code ~= 0 or not isFile(joinPath(work, packagedExe)) then
+          fail(code ~= 0 and err[1] and err or { update.asset .. " holds no " .. packagedExe })
+          return
+        end
+        if windows then
+          local text, problem = season.windowsHelper(target, staged, old)
+          local helper = joinPath(work, "install.cmd")
+          local f = text and open(helper, "wb")
+          if not f then
+            fail({ problem or helper .. " could not be written" })
+            return
+          end
+          f:write(text)
+          f:close()
+          pendingHelper = helper
+          done(true)
+          return
+        end
+        s.run({ "/usr/bin/xattr", "-dr", "com.apple.quarantine", staged }, function(code, out, err)
+          if code ~= 0 then
+            fail(err)
+            return
+          end
+          local ok, problem = season.replace(staged, target, old)
+          removeTree(work)
+          done(ok == true, problem and { problem })
+        end)
+      end)
+    end)
+  end)
+  return s
+end
+
+-- Starts the helper an install on Windows left, as the app exits.
+-- explorer.exe hands it to the shell, so it outlives the app, which
+-- ends every process it started when it exits.
+function season.finishInstall()
+  local helper = pendingHelper
+  if not helper then return end
+  pendingHelper = nil
+  run({ joinPath(getenv("SystemRoot") or "C:\\Windows", "explorer.exe"), helper },
+      function() end):wait()
 end
 
 function season.isClone(target)

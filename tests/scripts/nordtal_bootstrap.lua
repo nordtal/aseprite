@@ -88,6 +88,16 @@ case "$1 $2" in
   "auth git-credential") cat > /dev/null; printf 'username=designer\npassword=from-stub-gh\n' ;;
   "api user") echo designer ;;
   "repo list") cat "$(dirname "$0")/repos.json" ;;
+  "api repos/nordtal/aseprite/releases/latest") cat "$(dirname "$0")/latest.json" ;;
+  "release download")
+    # Copies package.zip as the asset that --pattern names into --dir
+    prev= ; pattern= ; dir=
+    for a in "$@"; do
+      [ "$prev" = --pattern ] && pattern=$a
+      [ "$prev" = --dir ] && dir=$a
+      prev=$a
+    done
+    cp "$(dirname "$0")/package.zip" "$dir/$pattern" ;;
   *) exit 1 ;;
 esac
 ]])
@@ -373,6 +383,196 @@ do
   home, err = java(clone)
   assert(home == expected, err and table.concat(err, "\n"))
   os.execute("rm -rf " .. quote(javaDir))
+end
+
+-- A release build knows its tag from the file the release workflow
+-- writes next to season.lua. A build without it never updates.
+do
+  assert(season.release == nil)
+  write(app.fs.joinPath(ext, "release"), "v1.3.18.6-designer.2\n")
+  assert(loadSeason().release == "v1.3.18.6-designer.2")
+  os.remove(app.fs.joinPath(ext, "release"))
+  if app.os.macos and app.os.arm64 then
+    assert(season.package == "Nordtal-Designer-macOS-arm64.zip")
+  elseif not app.os.windows then
+    assert(season.package == nil)
+  end
+end
+
+-- Tags compare by the Aseprite version, then by the designer's number
+do
+  local newer = season.newer
+  assert(newer("v1.3.18.6-designer.3", "v1.3.18.6-designer.2"))
+  assert(newer("v1.3.18.6-designer.10", "v1.3.18.6-designer.9"))
+  assert(newer("v1.3.19-designer.1", "v1.3.18.6-designer.9"))
+  assert(newer("v1.3.18.6-designer.1", "v1.3.18-designer.4"))
+  assert(newer("v1.10-designer.1", "v1.9.9-designer.1"))
+  assert(not newer("v1.3.18.6-designer.2", "v1.3.18.6-designer.2"))
+  assert(not newer("v1.3.18-designer.4", "v1.3.18.0-designer.4"))
+  assert(not newer("v1.3.18.6-designer.1", "v1.3.18.6-designer.2"))
+  assert(not newer("v1.3.17-designer.9", "v1.3.18-designer.1"))
+  for _, bad in ipairs{ "v1.3.19", "1.3.19-designer.1", "v1..3-designer.1", "v1.3.-designer.1",
+                        "v1.3-designer.x", "v1.3-designer.1-dev", "", false } do
+    assert(not newer(bad, "v1.3.18-designer.1"), tostring(bad))
+    assert(not newer("v1.3.18-designer.1", bad), tostring(bad))
+  end
+end
+
+-- The latest release is an update if its tag is newer than the app's
+-- and it has the package for this computer with its sha256
+do
+  local sum = string.rep("ab", 32)
+  local function release(fields)
+    local r = { tag_name="v1.3.18.6-designer.3", draft=false, prerelease=false,
+                assets={ { name="other.zip", digest="sha256:" .. string.rep("0", 64) },
+                         { name="P.zip", digest="sha256:" .. sum:upper() } } }
+    for k, v in pairs(fields or {}) do r[k] = v end
+    return r
+  end
+  local current = "v1.3.18.6-designer.2"
+  local update = season.updateFrom(release(), current, "P.zip")
+  assert(update.tag == "v1.3.18.6-designer.3")
+  assert(update.asset == "P.zip")
+  assert(update.sha256 == sum)
+  assert(season.updateFrom(release(), "v1.3.18.6-designer.3", "P.zip") == nil)
+  assert(season.updateFrom(release(), "v1.3.19-designer.1", "P.zip") == nil)
+  assert(season.updateFrom(release{ draft=true }, current, "P.zip") == nil)
+  assert(season.updateFrom(release{ prerelease=true }, current, "P.zip") == nil)
+  assert(season.updateFrom(release(), current, "Q.zip") == nil)
+  assert(season.updateFrom(release(), current, nil) == nil)
+  assert(season.updateFrom(release(), nil, "P.zip") == nil)
+  assert(season.updateFrom(release{ assets={ { name="P.zip" } } }, current, "P.zip") == nil)
+  assert(season.updateFrom(release{ assets={ { name="P.zip", digest="sha1:" .. sum } } },
+                           current, "P.zip") == nil)
+  assert(season.updateFrom(release{ assets=false }, current, "P.zip") == nil)
+  assert(season.updateFrom("Not Found", current, "P.zip") == nil)
+
+  -- gh asks the releases of the designer's repository
+  local function latest(json)
+    local fn = app.fs.joinPath(ext, "tools", "gh", "bin", "latest.json")
+    if json then write(fn, json) else os.remove(fn) end
+    local called, got, err = false, nil, nil
+    local p = season.latestUpdate(function(u, e) called, got, err = true, u, e end)
+    if p then p:wait() end
+    assert(called)
+    return got, err
+  end
+  local json = '{"tag_name":"v1.3.18.6-designer.3","draft":false,"prerelease":false,' ..
+               '"assets":[{"name":"P.zip","digest":"sha256:' .. sum .. '"}]}'
+  -- Without a tag of its own or a package for this computer it doesn't ask
+  season.release, season.package = nil, "P.zip"
+  assert(latest(json) == nil)
+  season.release, season.package = current, nil
+  assert(latest(json) == nil)
+  season.package = "P.zip"
+  update = latest(json)
+  assert(update and update.tag == "v1.3.18.6-designer.3" and update.sha256 == sum)
+  local last
+  for line in io.lines(app.fs.joinPath(ext, "tools", "gh", "bin", "calls")) do last = line end
+  assert(last:find("|api repos/nordtal/aseprite/releases/latest", 1, true), last)
+  local none, err = latest(nil)
+  assert(none == nil and err)
+  assert(latest("not json") == nil)
+  season.release, season.package = nil, nil
+end
+
+-- The new app takes the place of the old one, and a failed move leaves
+-- the old one where it was
+do
+  local dir = app.fs.joinPath(tmp, "replace")
+  local target = app.fs.joinPath(dir, "App")
+  local staged = app.fs.joinPath(dir, "work", "App")
+  local old = app.fs.joinPath(dir, "work", "old")
+  write(app.fs.joinPath(target, "version"), "old")
+  write(app.fs.joinPath(staged, "version"), "new")
+  write(app.fs.joinPath(old, "left-over"), "x")
+  assert(season.replace(staged, target, old))
+  assert(read(app.fs.joinPath(target, "version")) == "new")
+  assert(not app.fs.isDirectory(staged) and not app.fs.isDirectory(old))
+
+  local ok, err = season.replace(staged, target, old)
+  assert(not ok and err)
+  assert(read(app.fs.joinPath(target, "version")) == "new")
+  assert(not app.fs.isDirectory(old))
+end
+
+-- On Windows a helper moves the new folder into place once the app
+-- quit and the old folder can be moved
+do
+  local text = season.windowsHelper("C:\\Apps\\Nordtal Designer",
+                                    "C:\\Apps\\.nordtal-designer-update\\Nordtal Designer",
+                                    "C:\\Apps\\.nordtal-designer-update\\old")
+  assert(text:find('set "target=C:\\Apps\\Nordtal Designer"\r\n', 1, true), text)
+  assert(text:find('set "staged=C:\\Apps\\.nordtal-designer-update\\Nordtal Designer"\r\n', 1, true))
+  assert(text:find('set "old=C:\\Apps\\.nordtal-designer-update\\old"\r\n', 1, true))
+  assert(text:find(':wait\r\nmove "%target%" "%old%" >nul 2>&1\r\nif errorlevel 1 (\r\n', 1, true))
+  assert(text:find('goto wait', 1, true))
+  assert(text:find('move "%staged%" "%target%"', 1, true))
+  assert(text:find('if errorlevel 1 move "%old%" "%target%"', 1, true))
+  assert(not text:find("^\n") and not text:find("[^\r]\n"), "every line ends with CRLF")
+  local none, err = season.windowsHelper("C:\\100%\\Nordtal Designer", "C:\\a", "C:\\b")
+  assert(none == nil and err:find("100%", 1, true))
+end
+
+-- On macOS the install downloads the package with gh, checks it
+-- against the release's sha256, unpacks it next to the app, drops the
+-- quarantine attribute and replaces the app with it
+if app.os.macos then
+  local apps = app.fs.joinPath(tmp, "Applications")
+  local target = app.fs.joinPath(apps, "Nordtal Designer.app")
+  local exe = app.fs.joinPath(target, "Contents", "MacOS", "Nordtal Designer")
+  local work = app.fs.joinPath(apps, ".nordtal-designer-update")
+  write(exe, "old")
+  -- The package is a zip of a bundle by ditto, as the release workflow
+  -- makes it, with the quarantine attribute a browser download gets
+  local src = app.fs.joinPath(tmp, "package", "Nordtal Designer.app")
+  write(app.fs.joinPath(src, "Contents", "MacOS", "Nordtal Designer"), "new")
+  local zip = app.fs.joinPath(ext, "tools", "gh", "bin", "package.zip")
+  assert(os.execute("xattr -w com.apple.quarantine '0081;0;test;' " .. quote(src) ..
+                    " && ditto -c -k --keepParent " .. quote(src) .. " " .. quote(zip)))
+  local p = io.popen("shasum -a 256 " .. quote(zip))
+  local sum = p:read("a"):match("^(%x+)")
+  p:close()
+  local function install(update)
+    local ok, err
+    local steps = season.install(update, target, function(o, e) ok, err = o, e end)
+    if steps then steps:wait() end
+    return ok, err
+  end
+  local update = { tag="v1.3.18.6-designer.3", asset="Nordtal-Designer-macOS-arm64.zip" }
+
+  -- A download that doesn't match leaves the app as it was
+  update.sha256 = string.rep("0", 64)
+  local ok, err = install(update)
+  assert(not ok and table.concat(err, "\n"):find("checksum", 1, true))
+  assert(read(exe) == "old")
+  assert(not app.fs.isDirectory(work))
+
+  update.sha256 = sum
+  ok, err = install(update)
+  assert(ok, err and table.concat(err, "\n"))
+  assert(read(exe) == "new")
+  local x = io.popen("xattr -r " .. quote(target))
+  local attrs = x:read("a")
+  x:close()
+  assert(not attrs:find("com.apple.quarantine", 1, true), attrs)
+  assert(not app.fs.isDirectory(work))
+  local last
+  for line in io.lines(app.fs.joinPath(ext, "tools", "gh", "bin", "calls")) do last = line end
+  assert(last:find("|release download v1.3.18.6-designer.3 --repo nordtal/aseprite " ..
+                   "--pattern Nordtal-Designer-macOS-arm64.zip --dir " .. work, 1, true), last)
+
+  -- A package without the app inside leaves the app as it was
+  write(app.fs.joinPath(tmp, "empty", "x"), "x")
+  assert(os.execute("rm " .. quote(zip) .. " && ditto -c -k " ..
+                    quote(app.fs.joinPath(tmp, "empty")) .. " " .. quote(zip)))
+  p = io.popen("shasum -a 256 " .. quote(zip))
+  update.sha256 = p:read("a"):match("^(%x+)")
+  p:close()
+  ok, err = install(update)
+  assert(not ok and err)
+  assert(read(exe) == "new")
+  assert(not app.fs.isDirectory(work))
 end
 
 -- The device code is found in what gh prints
