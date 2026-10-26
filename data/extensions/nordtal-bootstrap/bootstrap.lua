@@ -177,7 +177,7 @@ end
 
 local loadPlugin
 
--- The JDK that gradlew in the clone runs with, then the plugin
+-- The JDK the season's Gradle runs on, then the plugin
 local function setUp(dir, repo)
   local steps = season.java(dir, function(home, err)
     if home then

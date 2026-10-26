@@ -354,8 +354,8 @@ end
 -- clone's daemon JVM criteria ask for. The first time it comes from
 -- the Adoptium API, checked against the API's sha256, into a folder
 -- of the app's config. The tools' environment gets it as JAVA_HOME,
--- so gradlew runs with it. Returns the steps, or nil if done was
--- called already.
+-- and the season's Gradle runs on it. Returns the steps, or nil if
+-- done was called already.
 function season.java(clone, done)
   local version, problem = javaVersion(clone)
   if not version then
