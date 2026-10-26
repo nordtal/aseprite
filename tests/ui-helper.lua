@@ -6,8 +6,10 @@
 -- os.exit() isn't available.)
 --
 -- A test whose results arrive later returns a function. It's called
--- every 0.1 s until it returns true, for at most 20 s.
-function ui_test(test)
+-- every interval seconds (0.1 s if not given) until it returns true,
+-- for at most 20 s.
+function ui_test(test, interval)
+  interval = interval or 0.1
   local function finish(ok, msg)
     io.stdout:write(ok and "PASS\n" or ("FAIL: " .. tostring(msg) .. "\n"))
     io.stdout:flush()
@@ -22,11 +24,11 @@ function ui_test(test)
   local ticks = 0
   local timer
   timer = Timer{
-    interval=0.1,
+    interval=interval,
     ontick=function()
       ticks = ticks + 1
       local ok, done = xpcall(check, debug.traceback)
-      if not ok or done or ticks >= 200 then
+      if not ok or done or ticks * interval >= 20 then
         timer:stop()
         finish(ok and done, ok and "timed out" or done)
       end

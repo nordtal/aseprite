@@ -12,6 +12,8 @@
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
 #include "app/script/security.h"
+#include "ui/manager.h"
+#include "ui/message.h"
 #include "ui/system.h"
 
 #include <atomic>
@@ -86,14 +88,23 @@ struct Shared {
     shared->cv.notify_all();
 
     // In the GUI the UI thread hands the events to Lua as they come,
-    // in batch mode only Process:wait() does.
+    // in batch mode only Process:wait() does. The UI thread gets them
+    // as a message, as it gets a timer's tick, so it paints what the
+    // callbacks change once they return, without waiting for input.
     if (App::instance() && App::instance()->isGui()) {
       std::weak_ptr<Shared> weak = shared;
       ui::execute_from_ui_thread([weak]() {
-        if (auto s = weak.lock()) {
-          if (s->owner)
-            dispatch_from_ui(s->owner);
-        }
+        ui::Manager* manager = ui::Manager::getDefault();
+        if (!manager)
+          return;
+        auto* msg = new ui::CallbackMessage([weak]() {
+          if (auto s = weak.lock()) {
+            if (s->owner)
+              dispatch_from_ui(s->owner);
+          }
+        });
+        msg->setRecipient(manager);
+        manager->enqueueMessage(msg);
       });
     }
   }
