@@ -621,7 +621,13 @@ bool ask_access(lua_State* L,
         link->setText(lines[0]);
         for (size_t i = 1; i < lines.size(); ++i) {
           auto line = new ui::LinkLabel("", lines[i]);
-          line->Click.connect([link] { link->Click(); });
+          if (link->type() == ui::WidgetType::kLinkLabelWidget)
+            line->Click.connect([link] { link->Click(); });
+          else {
+            // A plain label continues as a plain label
+            line->setType(link->type());
+            line->initTheme();
+          }
           link->parent()->addChild(line);
         }
       }
