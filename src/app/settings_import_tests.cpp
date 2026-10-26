@@ -202,3 +202,24 @@ TEST(SettingsImport, FindsOnlyAnotherDirectoryWithSettings)
   EXPECT_EQ("", find_aseprite_settings(from, from));
   EXPECT_EQ("", find_aseprite_settings(from, base::join_path(from, "inner")));
 }
+
+TEST(SettingsImport, DropsScriptAccessFromAReadOnlyIni)
+{
+  const std::string from = fresh_dir("from");
+  const std::string to = fresh_dir("to");
+  write(from, "aseprite.ini", "[general]\nscreen_scale = 2\n[script_access]\n0123 = 1\n");
+  const auto ini = std::filesystem::u8path(base::join_path(from, "aseprite.ini"));
+  std::filesystem::permissions(ini,
+                               std::filesystem::perms::owner_read |
+                                 std::filesystem::perms::group_read |
+                                 std::filesystem::perms::others_read);
+
+  EXPECT_TRUE(import_aseprite_settings(from, to));
+  std::filesystem::permissions(ini, std::filesystem::perms::owner_all);
+
+  cfg::CfgFile copy;
+  copy.load(base::join_path(to, "aseprite.ini"));
+  std::vector<std::string> sections;
+  copy.getAllSections(sections);
+  EXPECT_EQ((std::vector<std::string>{ "general" }), sections);
+}

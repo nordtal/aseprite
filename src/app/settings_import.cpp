@@ -20,8 +20,11 @@
   #include <CoreFoundation/CoreFoundation.h>
 #endif
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <stdexcept>
+#include <vector>
 
 namespace app {
 
@@ -69,6 +72,14 @@ static bool can_import(const std::string& from, const std::string& to)
   return !same_directory(from, to) && !inside(from, to);
 }
 
+// Copies a file and lets its owner write the copy, which keeps the
+// mode of a read-only source otherwise
+static void copy_writable(const fs::path& from, const fs::path& to)
+{
+  fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+  fs::permissions(to, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::add);
+}
+
 // Copies a file or a directory. A symlink to a file is copied as the
 // file, and one to a directory isn't followed, so a loop ends.
 static void copy_tree(const fs::path& from, const fs::path& to)
@@ -76,7 +87,7 @@ static void copy_tree(const fs::path& from, const fs::path& to)
   const fs::file_status st = fs::symlink_status(from);
   if (fs::is_symlink(st)) {
     if (fs::is_regular_file(fs::status(from)))
-      fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+      copy_writable(from, to);
   }
   else if (fs::is_directory(st)) {
     fs::create_directories(to);
@@ -84,7 +95,28 @@ static void copy_tree(const fs::path& from, const fs::path& to)
       copy_tree(entry.path(), to / entry.path().filename());
   }
   else if (fs::is_regular_file(st)) {
-    fs::copy_file(from, to, fs::copy_options::overwrite_existing);
+    copy_writable(from, to);
+  }
+}
+
+// Deletes the sections of the staged aseprite.ini that stay behind,
+// and throws if they are still in the saved file
+static void drop_sections(const fs::path& ini)
+{
+  cfg::CfgFile cfg;
+  if (!cfg.load(ini.u8string()))
+    throw std::runtime_error("The settings of Aseprite can't be read");
+  for (const char* section : kDroppedSections)
+    cfg.deleteSection(section);
+  cfg.save();
+
+  cfg::CfgFile saved;
+  std::vector<std::string> sections;
+  if (saved.load(ini.u8string()))
+    saved.getAllSections(sections);
+  for (const char* section : kDroppedSections) {
+    if (std::find(sections.begin(), sections.end(), section) != sections.end())
+      throw std::runtime_error("The settings of Aseprite can't be filtered");
   }
 }
 
@@ -139,13 +171,8 @@ bool import_aseprite_settings(const std::string& from, const std::string& to)
     }
 
     const fs::path ini = stage / "aseprite.ini";
-    if (fs::is_regular_file(ini)) {
-      cfg::CfgFile cfg;
-      cfg.load(ini.u8string());
-      for (const char* section : kDroppedSections)
-        cfg.deleteSection(section);
-      cfg.save();
-    }
+    if (fs::is_regular_file(ini))
+      drop_sections(ini);
 
     for (const char* item : kSettings) {
       if (!fs::exists(fs::symlink_status(stage / item)))
