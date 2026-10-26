@@ -58,6 +58,16 @@ int fake_process_new(lua_State* L)
   return 1;
 }
 
+// access(mode, resource): whether the call gets the access mode to
+// the resource without asking
+int access(lua_State* L)
+{
+  lua_pushboolean(
+    L,
+    is_trusted_access(L, FileAccessMode(luaL_checkinteger(L, 1)), luaL_checkstring(L, 2)));
+  return 1;
+}
+
 int fake_join_path(lua_State* L)
 {
   lua_pushfstring(L, "%s/%s", luaL_checkstring(L, 1), luaL_checkstring(L, 2));
@@ -111,6 +121,7 @@ protected:
     L = luaL_newstate();
     luaL_openlibs(L);
     lua_register(L, "probe", probe);
+    lua_register(L, "access", access);
     lua_pushstring(L, m_file.c_str());
     lua_setglobal(L, "trustedFile");
     register_app_like_globals(L);
@@ -151,6 +162,24 @@ protected:
     return result;
   }
 
+  // Whether the trusted callback() gets the access mode to resource
+  // without asking
+  bool trustedAccess(FileAccessMode mode, const char* resource)
+  {
+    lua_getglobal(L, "callback");
+    lua_getglobal(L, "access");
+    lua_pushinteger(L, int(mode));
+    lua_pushstring(L, resource);
+    if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
+      ADD_FAILURE() << lua_tostring(L, -1);
+      lua_pop(L, 1);
+      return false;
+    }
+    const bool result = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return result;
+  }
+
   lua_State* L = nullptr;
   std::string m_file;
 };
@@ -164,6 +193,44 @@ TEST_F(Trust, TheTrustedChunkAndItsFunctionsAreTrusted)
   ASSERT_EQ(LUA_OK, lua_pcall(L, 0, 1, 0));
   EXPECT_TRUE(lua_toboolean(L, -1));
   lua_pop(L, 1);
+}
+
+TEST_F(Trust, ATrustedCallReadsWritesAndRunsWithoutAsking)
+{
+  for (FileAccessMode mode :
+       { FileAccessMode::Read, FileAccessMode::Write, FileAccessMode::Execute })
+    EXPECT_TRUE(trustedAccess(mode, "/anywhere")) << int(mode);
+  EXPECT_FALSE(trustedAccess(FileAccessMode::LoadLib, "/anywhere"));
+}
+
+#ifdef ENABLE_WEBSOCKET
+TEST_F(Trust, ATrustedCallOpensAWebSocketToTheLoopbackHostOnlyWithoutAsking)
+{
+  for (const char* url : { "ws://127.0.0.1:4711",
+                           "ws://127.0.0.1:4711/bridge?x=1",
+                           "ws://localhost:4711",
+                           "ws://localhost" })
+    EXPECT_TRUE(trustedAccess(FileAccessMode::OpenSocket, url)) << url;
+
+  for (const char* url : { "ws://example.com:4711",
+                           "ws://127.0.0.1.example.com:4711",
+                           "ws://localhost.example.com",
+                           "ws://localhost@example.com:4711",
+                           "ws://127.0.0.1:4711@example.com",
+                           "ws://example.com/127.0.0.1",
+                           "ws://127.0.0.2:4711",
+                           "ws://[::1]:4711",
+                           "127.0.0.1:4711",
+                           "" })
+    EXPECT_FALSE(trustedAccess(FileAccessMode::OpenSocket, url)) << url;
+}
+
+#endif
+
+TEST_F(Trust, AnUntrustedCallOpensNoWebSocketWithoutAsking)
+{
+  EXPECT_FALSE(run("return (access(8, 'ws://127.0.0.1:4711'))"));
+  EXPECT_FALSE(run("return (access(4, '/anywhere'))"));
 }
 
 TEST_F(Trust, AnUntrustedChunkIsNotTrusted)
