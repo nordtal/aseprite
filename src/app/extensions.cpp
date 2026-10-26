@@ -51,6 +51,7 @@
 #include "archive_entry.h"
 #include "json11.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <sstream>
@@ -160,6 +161,9 @@ public:
   WriteArchive() : m_arch(nullptr), m_open(false)
   {
     m_arch = archive_write_disk_new();
+    archive_write_disk_set_options(m_arch,
+                                   ARCHIVE_EXTRACT_SECURE_SYMLINKS |
+                                     ARCHIVE_EXTRACT_SECURE_NODOTDOT);
     m_open = true;
   }
 
@@ -925,8 +929,9 @@ void Extension::initScripts()
     // Reset global init()/exit() functions
     engine->evalCode("init=nil exit=nil");
 
-    // Eval the code of the script (it should define an init() and an exit() function)
-    engine->evalFile(script.fn);
+    // Eval the code of the script (it should define an init() and an
+    // exit() function). The scripts that come with the app are trusted.
+    engine->evalFile(script.fn, {}, isBuiltinExtension());
 
     if (lua_getglobal(L, "exit") == LUA_TFUNCTION) {
       // Save a reference to the exit() function of this script
@@ -947,6 +952,9 @@ void Extension::initScripts()
       lua_pop(L, 1);
     }
   }
+
+  // Other scripts don't get to call the functions of this extension
+  engine->evalCode("init=nil exit=nil");
 }
 
 void Extension::exitScripts()
@@ -1060,6 +1068,15 @@ Extensions::Extensions()
     LOG("EXT: User extensions path '%s'\n", m_userExtensionsPath.c_str());
   }
 
+  // Only the extensions in the data folder of the app come with it
+  base::paths appDirs;
+  {
+    ResourceFinder rf(false);
+    rf.includeAppDataDir("extensions");
+    while (rf.next())
+      appDirs.push_back(base::normalize_path(rf.filename()));
+  }
+
   ResourceFinder rf;
   rf.includeUserDir("extensions");
   rf.includeDataDir("extensions");
@@ -1076,7 +1093,9 @@ Extensions::Extensions()
     std::sort(extensions.begin(), extensions.end());
     for (const auto& folder : extensions) {
       const auto dir = base::join_path(extensionsDir, folder);
-      const bool isBuiltinExtension = (m_userExtensionsPath != base::get_file_path(dir));
+      const bool isBuiltinExtension = std::find(appDirs.begin(),
+                                                appDirs.end(),
+                                                base::normalize_path(extensionsDir)) != appDirs.end();
 
       auto fullFn = base::join_path(dir, kPackageJson);
       fullFn = base::normalize_path(fullFn);
@@ -1105,8 +1124,14 @@ Extensions::~Extensions()
 
 void Extensions::executeInitActions()
 {
-  for (const auto& ext : m_extensions)
-    ext->executeInitActions();
+  // The extensions that come with the app first, so their scripts
+  // start before another script can replace a global function
+  for (const bool builtin : { true, false }) {
+    for (const auto& ext : m_extensions) {
+      if (ext->isBuiltinExtension() == builtin)
+        ext->executeInitActions();
+    }
+  }
 
   ScriptsChange(nullptr);
 }
@@ -1216,6 +1241,29 @@ void Extensions::uninstallExtension(Extension* extension, const DeletePluginPref
   delete extension;
 }
 
+bool is_valid_extension_name(const std::string& name)
+{
+  return !name.empty() && name != "." && name.find_first_of("/\\:") == std::string::npos &&
+         name.find("..") == std::string::npos;
+}
+
+bool is_safe_archive_entry(const std::string& filename)
+{
+  if (filename.empty() || filename[0] == '/' || filename[0] == '\\' ||
+      filename.find(':') != std::string::npos)
+    return false;
+  std::size_t start = 0;
+  while (start <= filename.size()) {
+    std::size_t end = filename.find_first_of("/\\", start);
+    if (end == std::string::npos)
+      end = filename.size();
+    if (filename.compare(start, end - start, "..") == 0)
+      return false;
+    start = end + 1;
+  }
+  return true;
+}
+
 ExtensionInfo Extensions::getCompressedExtensionInfo(const std::string& zipFn) const
 {
   ExtensionInfo info;
@@ -1266,6 +1314,8 @@ ExtensionInfo Extensions::getCompressedExtensionInfo(const std::string& zipFn) c
         }
       }
       info.name = json["name"].string_value();
+      if (!is_valid_extension_name(info.name))
+        throw base::Exception("The extension has an invalid name: '%s'", info.name.c_str());
       info.version = json["version"].string_value();
       info.dstPath = base::join_path(m_userExtensionsPath, info.name);
     }
@@ -1278,6 +1328,22 @@ Extension* Extensions::installCompressedExtension(const std::string& zipFn,
                                                   const ExtensionInfo& info)
 {
   base::paths installedFiles;
+
+  // Every file lands inside info.dstPath: no "..", no absolute path
+  // and no link that could point elsewhere
+  {
+    ReadArchive in(zipFn);
+    archive_entry* entry;
+    while ((entry = in.readEntry()) != nullptr) {
+      const char* entryFnPtr = archive_entry_pathname(entry);
+      if (!entryFnPtr)
+        continue;
+      const auto type = archive_entry_filetype(entry);
+      if (!is_safe_archive_entry(entryFnPtr) || archive_entry_hardlink(entry) ||
+          (type != AE_IFREG && type != AE_IFDIR))
+        throw base::Exception("The extension has a file outside its folder: '%s'", entryFnPtr);
+    }
+  }
 
   // Uncompress zipFn in info.dstPath
   {

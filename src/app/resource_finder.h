@@ -40,6 +40,9 @@ public:
   void addPath(const std::string& path);
   void includeBinDir(const char* filename);
   void includeDataDir(const char* filename);
+  // The data folder of the app itself, without the one in the user's
+  // folder that includeDataDir() also adds
+  void includeAppDataDir(const char* filename);
   void includeHomeDir(const char* filename);
 
 #if !defined(_WIN32) && !defined(__APPLE__)

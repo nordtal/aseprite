@@ -13,12 +13,12 @@
 
 #include "app/app.h"
 #include "app/context.h"
-#include "app/extensions.h"
 #include "app/i18n/strings.h"
 #include "app/ini_file.h"
 #include "app/launcher.h"
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
+#include "app/script/trust.h"
 #include "base/convert_to.h"
 #include "base/fs.h"
 #include "base/sha1.h"
@@ -101,22 +101,6 @@ std::string get_script_filename(lua_State* L, int stackLevel)
     script = ar.source + 1;
 
   return script;
-}
-
-// A script of an extension that comes with the app is as trusted as
-// the app itself
-bool is_builtin_script(const std::string& script)
-{
-  const std::string fn = base::normalize_path(script);
-  for (const Extension* ext : App::instance()->extensions()) {
-    if (!ext->isBuiltinExtension())
-      continue;
-    const std::string dir = base::normalize_path(ext->path());
-    if (fn.size() > dir.size() && fn.compare(0, dir.size(), dir) == 0 &&
-        base::is_path_separator(fn[dir.size()]))
-      return true;
-  }
-  return false;
 }
 
 int unsupported(lua_State* L)
@@ -300,6 +284,25 @@ void overwrite_unsecure_functions(lua_State* L)
   }
   lua_pop(L, 1);
 
+  // Without these a script could read or change the locals, upvalues
+  // and objects of another one, and steer a trusted function
+  lua_getglobal(L, "debug");
+  for (const char* name : { "getlocal",
+                            "setlocal",
+                            "getupvalue",
+                            "setupvalue",
+                            "upvaluejoin",
+                            "sethook",
+                            "getregistry",
+                            "getmetatable",
+                            "setmetatable",
+                            "getuservalue",
+                            "setuservalue" }) {
+    lua_pushcfunction(L, unsupported);
+    lua_setfield(L, -2, name);
+  }
+  lua_pop(L, 1);
+
   // Replace functions with our own implementations (that ask for
   // permissions first).
   for (auto& item : replaced_functions) {
@@ -335,7 +338,12 @@ bool ask_access(lua_State* L,
       return false;
     }
 
-    if (is_builtin_script(script))
+    // A script that comes with the app reads, writes and runs
+    // programs like the app itself, as long as no other script is
+    // part of the call
+    if ((mode == FileAccessMode::Read || mode == FileAccessMode::Write ||
+         mode == FileAccessMode::Execute) &&
+        is_trusted_call(L))
       return true;
 
     const char* section = "script_access";

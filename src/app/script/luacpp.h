@@ -133,10 +133,7 @@ inline void setfield_uinteger(lua_State* L, const char* key, const T& value)
 #define REG_CLASS(L, T)                                                                            \
   {                                                                                                \
     luaL_newmetatable(L, get_mtname<T>());                                                         \
-    lua_getglobal(L, "__generic_mt_index");                                                        \
-    lua_setfield(L, -2, "__index");                                                                \
-    lua_getglobal(L, "__generic_mt_newindex");                                                     \
-    lua_setfield(L, -2, "__newindex");                                                             \
+    set_generic_mt_functions(L, -1);                                                               \
     luaL_setfuncs(L, T##_methods, 0);                                                              \
     lua_pop(L, 1);                                                                                 \
   }
@@ -153,7 +150,7 @@ struct Property {
   lua_CFunction setter;
 };
 
-void run_mt_index_code(lua_State* L);
+void set_generic_mt_functions(lua_State* L, int mt);
 void create_mt_getters_setters(lua_State* L, const char* tname, const Property* properties);
 
 bool lua_is_key_true(lua_State* L, int tableIndex, const char* keyName);

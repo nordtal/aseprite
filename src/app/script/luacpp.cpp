@@ -15,37 +15,78 @@
 
 namespace app { namespace script {
 
-static const char mt_index_code[] =
-  "__generic_mt_index = function(t, k) "
-  "  local mt = getmetatable(t) "
-  "  local f = mt[k] "
-  "  if f then return f end "
-  "  f = mt.__getters[k] "
-  "  if f then return f(t) end "
-  "  if type(t) == 'table' then return rawget(t, k) end "
-  "  error(debug.traceback()..': Field '..tostring(k)..' does not exist')"
-  "end "
-  "__generic_mt_newindex = function(t, k, v) "
-  "  local mt = getmetatable(t) "
-  "  local f = mt[k] "
-  "  if f then return f end "
-  "  f = mt.__setters[k] "
-  "  if f then return f(t, v) end "
-  "  if type(t) == 'table' then return rawset(t, k, v) end "
-  "  error(debug.traceback()..': Cannot set field '..tostring(k))"
-  "end";
+namespace {
 
-void run_mt_index_code(lua_State* L)
+// Looks name up in the metatable of t, or calls its getter or setter.
+// It's C, so a script that replaces a global function can't change
+// how the app's objects find their methods and properties.
+int generic_mt_access(lua_State* L, const bool set)
 {
-  if (luaL_loadbuffer(L, mt_index_code, sizeof(mt_index_code) - 1, "internal") ||
-      lua_pcall(L, 0, 0, 0)) {
-    // Error case
-    const char* s = lua_tostring(L, -1);
-    if (s)
-      std::puts(s);
-
-    lua_pop(L, 1);
+  const int t = 1, k = 2;
+  if (!lua_getmetatable(L, t))
+    return 0;
+  const int mt = lua_gettop(L);
+  lua_pushvalue(L, k);
+  if (lua_rawget(L, mt) != LUA_TNIL)
+    return 1;
+  lua_pop(L, 1);
+  if (lua_getfield(L, mt, set ? "__setters" : "__getters") == LUA_TTABLE) {
+    lua_pushvalue(L, k);
+    if (lua_rawget(L, -2) != LUA_TNIL) {
+      lua_pushvalue(L, t);
+      if (set) {
+        lua_pushvalue(L, 3);
+        lua_call(L, 2, 0);
+        return 0;
+      }
+      lua_call(L, 1, 1);
+      return 1;
+    }
   }
+  return -1;
+}
+
+int generic_mt_index(lua_State* L)
+{
+  const int n = generic_mt_access(L, false);
+  if (n >= 0)
+    return n;
+  if (lua_type(L, 1) == LUA_TTABLE) {
+    lua_pushvalue(L, 2);
+    lua_rawget(L, 1);
+    return 1;
+  }
+  luaL_traceback(L, L, nullptr, 1);
+  return luaL_error(L, "%s: Field '%s' does not exist", lua_tostring(L, -1), luaL_tolstring(L, 2, nullptr));
+}
+
+int generic_mt_newindex(lua_State* L)
+{
+  const int n = generic_mt_access(L, true);
+  if (n >= 0)
+    return n;
+  if (lua_type(L, 1) == LUA_TTABLE) {
+    lua_settop(L, 3);
+    lua_rawset(L, 1);
+    return 0;
+  }
+  luaL_traceback(L, L, nullptr, 1);
+  return luaL_error(L, "%s: Cannot set field '%s'", lua_tostring(L, -1), luaL_tolstring(L, 2, nullptr));
+}
+
+} // anonymous namespace
+
+void set_generic_mt_functions(lua_State* L, int mt)
+{
+  mt = lua_absindex(L, mt);
+  lua_pushcfunction(L, generic_mt_index);
+  lua_setfield(L, mt, "__index");
+  lua_pushcfunction(L, generic_mt_newindex);
+  lua_setfield(L, mt, "__newindex");
+  // getmetatable() gives a script false instead of the metatable, so
+  // it can't change the methods of the objects other scripts use
+  lua_pushboolean(L, false);
+  lua_setfield(L, mt, "__metatable");
 }
 
 void create_mt_getters_setters(lua_State* L, const char* tname, const Property* properties)

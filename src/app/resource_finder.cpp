@@ -94,22 +94,41 @@ void ResourceFinder::includeDataDir(const char* filename)
 
   std::snprintf(buf, sizeof(buf), "data/%s", filename);
   includeHomeDir(buf); // %AppData%/<app name>/data/filename
-  includeBinDir(buf);  // $BINDIR/data/filename
 
 #elif __APPLE__
 
   std::snprintf(buf, sizeof(buf), "data/%s", filename);
   includeUserDir(buf); // $HOME/Library/Application Support/<app name>/data/filename
-  includeBinDir(buf);  // $BINDIR/data/filename (outside the bundle)
-
-  std::snprintf(buf, sizeof(buf), "../Resources/data/%s", filename);
-  includeBinDir(buf); // $BINDIR/../Resources/data/filename (inside a bundle)
 
 #else
 
   // $HOME/.config/nordtal-designer/filename
   std::snprintf(buf, sizeof(buf), "%s/data/%s", kLinuxConfigDir, filename);
   includeHomeConfigDir(buf);
+
+#endif
+
+  includeAppDataDir(filename);
+}
+
+void ResourceFinder::includeAppDataDir(const char* filename)
+{
+  char buf[4096];
+
+#ifdef _WIN32
+
+  std::snprintf(buf, sizeof(buf), "data/%s", filename);
+  includeBinDir(buf); // $BINDIR/data/filename
+
+#elif __APPLE__
+
+  std::snprintf(buf, sizeof(buf), "data/%s", filename);
+  includeBinDir(buf); // $BINDIR/data/filename (outside the bundle)
+
+  std::snprintf(buf, sizeof(buf), "../Resources/data/%s", filename);
+  includeBinDir(buf); // $BINDIR/../Resources/data/filename (inside a bundle)
+
+#else
 
   // $BINDIR/data/filename
   std::snprintf(buf, sizeof(buf), "data/%s", filename);

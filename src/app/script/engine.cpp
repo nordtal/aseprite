@@ -21,6 +21,7 @@
 #include "app/script/luacpp.h"
 #include "app/script/require.h"
 #include "app/script/security.h"
+#include "app/script/trust.h"
 #include "app/sprite_sheet_type.h"
 #include "app/tilemap_mode.h"
 #include "app/tileset_mode.h"
@@ -245,9 +246,6 @@ Engine::Engine() : L(luaL_newstate()), m_delegate(nullptr), m_printLastResult(fa
 
   // Enhance require() function for plugins
   custom_require_function(L);
-
-  // Generic code used by metatables
-  run_mt_index_code(L);
 
   // Register global objects (app, json)
   register_app_object(L);
@@ -571,11 +569,14 @@ void Engine::printLastResult()
   m_printLastResult = true;
 }
 
-bool Engine::evalCode(const std::string& code, const std::string& filename)
+bool Engine::evalCode(const std::string& code, const std::string& filename, const bool trusted)
 {
   bool ok = true;
   try {
-    if (luaL_loadbuffer(L, code.c_str(), code.size(), filename.c_str()) || lua_pcall(L, 0, 1, 0)) {
+    const int status = luaL_loadbuffer(L, code.c_str(), code.size(), filename.c_str());
+    if (status == LUA_OK && trusted)
+      trust_chunk(L, -1);
+    if (status != LUA_OK || lua_pcall(L, 0, 1, 0)) {
       const char* s = lua_tostring(L, -1);
       if (s)
         onConsoleError(s);
@@ -623,7 +624,7 @@ void Engine::handleException(const std::exception& ex)
   onConsoleError(msg.c_str());
 }
 
-bool Engine::evalFile(const std::string& filename, const Params& params)
+bool Engine::evalFile(const std::string& filename, const Params& params, const bool trusted)
 {
   std::stringstream buf;
   {
@@ -641,7 +642,7 @@ bool Engine::evalFile(const std::string& filename, const Params& params)
   if (g_debuggerDelegate)
     g_debuggerDelegate->startFile(absFilename, buf.str());
 
-  bool result = evalCode(buf.str(), "@" + absFilename);
+  bool result = evalCode(buf.str(), "@" + absFilename, trusted);
 
   if (g_debuggerDelegate)
     g_debuggerDelegate->endFile(absFilename);

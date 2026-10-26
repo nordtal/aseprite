@@ -98,8 +98,11 @@ public:
   void notifyRunningGui();
 
   void printLastResult();
-  bool evalCode(const std::string& code, const std::string& filename = std::string());
-  bool evalFile(const std::string& filename, const Params& params = Params());
+  // A trusted chunk runs like the app itself, see trust.h
+  bool evalCode(const std::string& code,
+                const std::string& filename = std::string(),
+                bool trusted = false);
+  bool evalFile(const std::string& filename, const Params& params = Params(), bool trusted = false);
   bool evalUserFile(const std::string& filename, const Params& params = Params());
 
   void handleException(const std::exception& ex);

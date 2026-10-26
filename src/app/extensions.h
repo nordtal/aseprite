@@ -261,6 +261,14 @@ private:
   std::string m_userExtensionsPath;
 };
 
+// A name of an extension that is one folder inside the extensions
+// folder: no path separator and no ".."
+bool is_valid_extension_name(const std::string& name);
+
+// A file of an extension archive that lands inside the extension's
+// folder: relative and without ".."
+bool is_safe_archive_entry(const std::string& filename);
+
 } // namespace app
 
 #endif

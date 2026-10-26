@@ -41,11 +41,14 @@ jobs:
           -DSKIA_DIR=$PWD/skia \
           -DSKIA_LIBRARY_DIR=$PWD/skia/out/Release-x64
     - name: Build
-      run: ninja -C build aseprite tree_widget_tests settings_import_tests
+      run: ninja -C build aseprite tree_widget_tests settings_import_tests trust_tests extension_paths_tests resource_finder_tests
     - name: Unit tests
       run: |
         build/bin/tree_widget_tests
         build/bin/settings_import_tests
+        build/bin/trust_tests
+        build/bin/extension_paths_tests
+        build/bin/resource_finder_tests
     - name: Script tests
       run: |
         export ASEPRITE=$PWD/build/bin/aseprite
