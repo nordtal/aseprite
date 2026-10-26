@@ -57,6 +57,8 @@ case "$1 $2" in
   "auth login")
     echo >&2
     echo "! One-time code (ABCD-1234) copied to clipboard" >&2
+    # The sign-in shows the code once, however often gh prints it
+    echo "! One-time code (ABCD-1234) copied to clipboard" >&2
     echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
     sleep 1
     mkdir -p "$GH_CONFIG_DIR" && echo "github.com:" > "$GH_CONFIG_DIR/hosts.yml"
