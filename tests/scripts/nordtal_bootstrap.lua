@@ -3,6 +3,27 @@
 
 if app.os.windows then return end
 
+-- The test removes folders of the app's config, so it runs only with
+-- ASEPRITE_USER_FOLDER set to a folder of its own inside the temporary
+-- folder, as run-tests.sh sets it
+do
+  local fs = app.fs
+  local function inside(path, folder, orEqual)
+    path = fs.normalizePath(path):gsub("/+$", "")
+    folder = fs.normalizePath(folder):gsub("/+$", "")
+    return (orEqual and path == folder) or path:sub(1, #folder + 1) == folder .. "/"
+  end
+  local user = os.getenv("ASEPRITE_USER_FOLDER")
+  if not user or user == "" then
+    error("the test needs ASEPRITE_USER_FOLDER set to a new temporary folder")
+  end
+  if not inside(fs.userConfigPath, user, true) or not inside(fs.userConfigPath, fs.tempPath) then
+    error("the test needs ASEPRITE_USER_FOLDER set to a new folder inside " .. fs.tempPath ..
+          ", and the config in it, not " .. fs.userConfigPath)
+  end
+end
+-- (the guard ends here)
+
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 
 -- gh never sees a token of the environment, so the test runs with one
