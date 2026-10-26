@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -21,9 +22,13 @@ using namespace app::script;
 
 namespace {
 
+// Whether each call of probe() was trusted
+std::vector<bool> g_probes;
+
 int probe(lua_State* L)
 {
-  lua_pushboolean(L, is_trusted_call(L));
+  g_probes.push_back(is_trusted_call(L));
+  lua_pushboolean(L, g_probes.back());
   return 1;
 }
 
@@ -252,6 +257,26 @@ TEST_F(Trust, ACFunctionThatTheAppCallsBackIsNotTrusted)
 {
   lua_pushcfunction(L, command);
   EXPECT_FALSE(call_back(L));
+}
+
+TEST_F(Trust, ATrustedFunctionThatRunsAsAFinalizerIsNotTrusted)
+{
+  // A script makes the trusted direct() the finalizer of a table, and
+  // the collector calls it when the app or a trusted function makes
+  // the step that collects it: no untrusted function is on the stack
+  const auto collectedBy = [this](const std::function<void()>& step) {
+    run("setmetatable({}, { __gc=direct })");
+    g_probes.clear();
+    step();
+    EXPECT_EQ(1u, g_probes.size()) << "the finalizer didn't run";
+    return !g_probes.empty() && g_probes[0];
+  };
+  EXPECT_FALSE(collectedBy([this] { lua_gc(L, LUA_GCCOLLECT); }));
+  EXPECT_FALSE(collectedBy([this] {
+    lua_getglobal(L, "callback");
+    lua_getglobal(L, "collectgarbage");
+    ASSERT_EQ(LUA_OK, lua_pcall(L, 1, 0, 0)) << lua_tostring(L, -1);
+  }));
 }
 
 TEST_F(Trust, AChunkWithTheNameOfTheTrustedFileIsNotTrusted)

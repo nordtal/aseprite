@@ -12,6 +12,7 @@
 
 #include "lauxlib.h"
 #include "lobject.h"
+#include "lstate.h"
 #include "lualib.h"
 
 #include <algorithm>
@@ -371,6 +372,12 @@ bool is_trusted_call(lua_State* L)
   bool trusted = false;
   lua_Debug ar, caller;
   for (int level = 0; lua_getstack(L, level, &ar); ++level) {
+    // The collector runs a finalizer on top of whatever it interrupted,
+    // even the app with no Lua function below
+    if (ar.i_ci->previous && (ar.i_ci->previous->callstatus & CIST_FIN)) {
+      trusted = false;
+      break;
+    }
     lua_getinfo(L, "Stf", &ar);
     if (lua_iscfunction(L, -1)) {
       // A C function on the stack hides what it was called from when
