@@ -94,6 +94,10 @@ public:
   TreeModel& model() { return m_model; }
   const TreeModel& model() const { return m_model; }
 
+  // The width the tree asks for in pixels, or 0 to ask for the width
+  // of its widest row. A wider row scrolls.
+  void setPreferredWidth(int width);
+
 protected:
   void onSizeHint(ui::SizeHintEvent& ev) override;
 
@@ -102,6 +106,7 @@ private:
 
   TreeModel m_model;
   Content* m_content;
+  int m_preferredWidth = 0;
 };
 
 }} // namespace app::script
