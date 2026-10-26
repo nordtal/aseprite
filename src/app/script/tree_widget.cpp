@@ -162,6 +162,23 @@ void TreeModel::contextMenu(TreeNode* node)
     ContextMenu(node);
 }
 
+TreeRowLayout tree_row_layout(const gfx::Rect& row,
+                              const gfx::Rect& visible,
+                              const int labelX,
+                              const int badgeTextWidth,
+                              const int pad)
+{
+  TreeRowLayout layout;
+  int right = std::min(row.x2(), visible.x2()) - pad;
+  if (badgeTextWidth > 0) {
+    const int w = badgeTextWidth + 2 * pad;
+    layout.badge = gfx::Rect(right - w, row.y + pad / 2, w, row.h - pad);
+    right = layout.badge.x - pad;
+  }
+  layout.label = gfx::Rect(labelX, row.y, std::max(0, right - labelX), row.h);
+  return layout;
+}
+
 // The widget inside the view that paints the visible rows.
 class Tree::Content : public Widget {
 public:
@@ -218,6 +235,9 @@ protected:
     const auto& rows = m_model.rows();
     const int h = rowHeight();
     const int pad = 2 * guiscale();
+    // The part of the content that the view shows
+    gfx::Rect visible = m_view->viewportBounds();
+    visible.offset(-bounds().origin());
     for (int row = 0; row < int(rows.size()); ++row) {
       const gfx::Rect rc = rowBounds(row);
       if ((g->getClipBounds() & rc).isEmpty())
@@ -256,26 +276,25 @@ protected:
         }
       }
 
-      // Badge
-      int right = rc.x2() - pad;
-      if (!node->badge.empty()) {
-        const gfx::Size sz = g->measureText(node->badge);
-        const gfx::Rect badge(right - sz.w - 2 * pad, rc.y + guiscale(), sz.w + 2 * pad, h - 2 * guiscale());
+      // Badge, at the right edge of the viewport even when the row is
+      // wider, and the label before it
+      const gfx::Size badgeSz = (node->badge.empty() ? gfx::Size() : g->measureText(node->badge));
+      const TreeRowLayout layout = tree_row_layout(rc, visible, x, badgeSz.w, pad);
+      if (!layout.badge.isEmpty()) {
         const gfx::Color badgeBg = (selected ? theme->colors.listitemSelectedText() :
                                                theme->colors.listitemSelectedFace());
         const gfx::Color badgeFg = (selected ? theme->colors.listitemSelectedFace() :
                                                theme->colors.listitemSelectedText());
-        g->fillRect(badgeBg, badge);
+        g->fillRect(badgeBg, layout.badge);
         g->drawText(node->badge,
                     badgeFg,
                     badgeBg,
-                    gfx::Point(badge.x + pad, rc.y + (h - sz.h) / 2));
-        right = badge.x - pad;
+                    gfx::Point(layout.badge.x + pad, rc.y + (h - badgeSz.h) / 2));
       }
 
       // Label
       const gfx::Size sz = g->measureText(node->text);
-      IntersectClip clip(g, gfx::Rect(x, rc.y, std::max(0, right - x), h));
+      IntersectClip clip(g, layout.label);
       if (clip)
         g->drawText(node->text, fg, bg, gfx::Point(x, rc.y + (h - sz.h) / 2));
     }
@@ -378,6 +397,16 @@ void Tree::setPreferredWidth(const int width)
 {
   m_preferredWidth = std::max(0, width);
   invalidate();
+}
+
+void Tree::onSetViewScroll(const gfx::Point& pt)
+{
+  // The view moves what it painted, but the badges stay at its right
+  // edge
+  const int oldX = viewScroll().x;
+  View::onSetViewScroll(pt);
+  if (viewScroll().x != oldX)
+    m_content->invalidate();
 }
 
 void Tree::onSizeHint(SizeHintEvent& ev)
