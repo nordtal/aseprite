@@ -26,13 +26,17 @@
 //    plugin.require() of the season plugin
 // 5: Dialog:tree{ width } and Dialog:modify{ id, width } of a tree
 // 6: Dialog:panel{ id, side, width }, after which the widgets of a
-//    Dialog{ tab=true } go into a side panel. The main window docks
-//    it at its far edge while the tab is active: side="left" (the
+//    Dialog{ tab=true } go into a side panel, where a widget without
+//    a label takes the label's column too. The main window docks it
+//    at its far edge while the tab is active: side="left" (the
 //    default) is outside the colour bar, side="right" outside the
-//    tools, both mirrored with the layout. width is in points, and a
+//    tools, both mirrored with the layout. width is in points. A
 //    panel with an id keeps the width the user drags it to across
-//    restarts. Dialog:modify{ id, side, width } of the panel, and
-//    Dialog.bounds of an open tab is the tab's place in the window.
+//    restarts, under its id within the plugin; one without an id keeps
+//    it for the session under the dialog's title. The id is none of
+//    the dialog's other ids. Dialog:modify{ id, side, width } of the
+//    panel, and Dialog.bounds of an open tab is the tab's place in the
+//    window while it's active, an empty rectangle while it isn't.
 #define FORK_API_VERSION 6
 
 #endif

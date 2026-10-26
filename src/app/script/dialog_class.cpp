@@ -14,6 +14,7 @@
 #include "app/color_utils.h"
 #include "app/context.h"
 #include "app/doc.h"
+#include "app/extensions.h"
 #include "app/file_selector.h"
 #include "app/script/canvas_widget.h"
 #include "app/script/docobj.h"
@@ -673,6 +674,10 @@ int Dialog_add_widget(lua_State* L, Widget* widget)
     if (type == LUA_TSTRING) {
       if (auto s = lua_tostring(L, -1)) {
         id = s;
+        if (dlg->tab && dlg->tab->sidePanel() && dlg->tab->sidePanel()->id() == id) {
+          delete widget;
+          return luaL_error(L, "the id \"%s\" is the side panel's", s);
+        }
         widget->setId(s);
         dlg->dataWidgets[id] = widget;
       }
@@ -730,8 +735,10 @@ int Dialog_add_widget(lua_State* L, Widget* widget)
         dlg->labelWidgets[id] = labelWidget;
     }
     else {
-      // For tabs and separators, we don't want the empty space of an unspecified label.
-      if (widget->type() != Tabs::Type() && widget->type() != ui::kSeparatorWidget) {
+      // For tabs and separators, we don't want the empty space of an
+      // unspecified label, nor in the narrow side panel.
+      if (widget->type() != Tabs::Type() && widget->type() != ui::kSeparatorWidget &&
+          dlg->currentGrid != dlg->panelGrid) {
         dlg->currentGrid->addChildInCell(new ui::HBox, 1, 1, ui::LEFT | ui::TOP);
       }
     }
@@ -740,11 +747,14 @@ int Dialog_add_widget(lua_State* L, Widget* widget)
     if (widget->type() == ui::kButtonWidget)
       hbox->enableFlags(ui::HOMOGENEOUS);
 
-    // For tabs and unlabeled separators, we don't want the empty space of an unspecified label, so
+    // For tabs, unlabeled separators and unlabeled widgets of the side
+    // panel, we don't want the empty space of an unspecified label, so
     // span 2 columns.
-    const int hspan =
-      ((widget->type() == Tabs::Type()) || (widget->type() == ui::kSeparatorWidget && !label) ? 2 :
-                                                                                                1);
+    const int hspan = ((widget->type() == Tabs::Type()) ||
+                           (!label && (widget->type() == ui::kSeparatorWidget ||
+                                       dlg->currentGrid == dlg->panelGrid)) ?
+                         2 :
+                         1);
     dlg->currentGrid->addChildInCell(hbox,
                                      hspan,
                                      1,
@@ -1666,6 +1676,25 @@ int Dialog_editor(lua_State* L)
   return Dialog_add_widget(L, slot);
 }
 
+// The name of the extension that the calling script belongs to, or
+// nothing for a script of its own
+std::string caller_extension(lua_State* L)
+{
+  lua_Debug ar;
+  if (!lua_getstack(L, 1, &ar) || !lua_getinfo(L, "S", &ar) || ar.source[0] != '@')
+    return std::string();
+
+  const std::string file = base::normalize_path(ar.source + 1);
+  for (const Extension* ext : App::instance()->extensions()) {
+    std::string dir = base::normalize_path(ext->path());
+    if (!dir.empty() && dir.back() != base::path_separator)
+      dir.push_back(base::path_separator);
+    if (file.compare(0, dir.size(), dir) == 0)
+      return ext->name();
+  }
+  return std::string();
+}
+
 int get_panel_side(lua_State* L, int index)
 {
   static const char* const sides[] = { "left", "right", nullptr };
@@ -1703,10 +1732,20 @@ int Dialog_panel(lua_State* L)
     lua_pop(L, 1);
   }
 
+  if (id && dlg->dataWidgets.count(id))
+    return luaL_error(L, "the id \"%s\" of the side panel is taken", id);
+
+  // The panel keeps its width under its id across restarts, or under
+  // the dialog's title for the session, apart from other plugins
+  const std::string owner = caller_extension(L);
   SidePanel* panel = dlg->tab->makeSidePanel();
   if (id) {
     panel->setId(id);
     dlg->dataWidgets[id] = panel;
+    panel->setWidthKey(owner.empty() ? id : owner + ":" + id, true);
+  }
+  else {
+    panel->setWidthKey(owner + "\n" + dlg->window.text(), false);
   }
   panel->setSide(side);
   panel->setDefaultWidth(width);
@@ -1839,6 +1878,8 @@ int Dialog_modify(lua_State* L)
   if (lua_istable(L, 2)) {
     const char* id = nullptr;
     bool relayout = false;
+    // The side panel docks again at another side or width
+    bool movePanel = false;
 
     int type = lua_getfield(L, 2, "id");
     if (type != LUA_TNIL)
@@ -2046,13 +2087,22 @@ int Dialog_modify(lua_State* L)
 
     if (dlg->tab && widget == dlg->tab->sidePanel()) {
       auto panel = static_cast<SidePanel*>(widget);
-      if (lua_getfield(L, 2, "side") != LUA_TNIL)
-        panel->setSide(get_panel_side(L, -1));
+      if (lua_getfield(L, 2, "side") != LUA_TNIL) {
+        const int side = get_panel_side(L, -1);
+        if (side != panel->side()) {
+          panel->setSide(side);
+          movePanel = true;
+        }
+      }
       lua_pop(L, 1);
-      if (lua_getfield(L, 2, "width") != LUA_TNIL)
-        panel->setWidth(lua_tointeger(L, -1));
+      if (lua_getfield(L, 2, "width") != LUA_TNIL) {
+        const int width = lua_tointeger(L, -1);
+        if (width != panel->width()) {
+          panel->setWidth(width);
+          movePanel = true;
+        }
+      }
       lua_pop(L, 1);
-      relayout = true;
     }
 
     type = lua_getfield(L, 2, "sprite");
@@ -2068,11 +2118,17 @@ int Dialog_modify(lua_State* L)
     // This is due to the possibility of a script calling a method
     // to modify dialog's properties (which might generate a relayout)
     // during an ongoing resize event.
+    if (movePanel) {
+      update_side_panel(dlg);
+    }
+    else if (relayout && dlg->tab && dlg->tab->sidePanel()) {
+      dlg->tab->sidePanel()->layout();
+      dlg->tab->sidePanel()->invalidate();
+    }
+
     if (relayout && dlg->tab) {
       dlg->tab->layout();
       dlg->tab->invalidate();
-      if (dlg->tab->sidePanel())
-        update_side_panel(dlg);
     }
     else if (relayout && !dlg->window.isResizing()) {
       gfx::Rect prelayoutBounds = dlg->window.bounds();
@@ -2381,9 +2437,10 @@ int Dialog_set_data(lua_State* L)
 int Dialog_get_bounds(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
-  // An open tab is where it shows in the main window
+  // An open tab is where it shows in the main window while it's
+  // active, and nowhere while another tab is
   if (dlg->tab && dlg->tab->parent()) {
-    push_new<gfx::Rect>(L, dlg->tab->bounds());
+    push_new<gfx::Rect>(L, dlg->tab->isVisible() ? dlg->tab->bounds() : gfx::Rect());
     return 1;
   }
   if (!dlg->window.isVisible() && dlg->window.bounds().isEmpty() && dlg->window.isAutoRemap()) {

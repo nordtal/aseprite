@@ -142,6 +142,7 @@ private:
   DocView* getDocView();
   HomeView* getHomeView();
   void configureWorkspaceLayout();
+  void undockSidePanel();
   void saveTimelineConfiguration();
   void saveColorBarConfiguration();
   void saveActiveLayout();
@@ -173,6 +174,8 @@ private:
   obs::scoped_connection m_saveDockLayoutConn;
   obs::scoped_connection m_customizedDockConn;
   obs::scoped_connection m_sidePanelResizeConn;
+  // The dock of the side panel and the customizable layout
+  Dock* m_panelDock = nullptr;
   SidePanel* m_sidePanel = nullptr;
   bool m_firstResize = true;
 };

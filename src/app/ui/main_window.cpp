@@ -48,6 +48,7 @@
 #include "os/system.h"
 #include "ui/app_state.h"
 #include "ui/drag_event.h"
+#include "ui/manager.h"
 #include "ui/message.h"
 #include "ui/splitter.h"
 #include "ui/system.h"
@@ -178,7 +179,10 @@ void MainWindow::initialize()
   m_dock->top()->center()->dock(ui::BOTTOM, m_tabsBar.get());
   m_dock->top()->center()->dock(ui::CENTER, m_menuBar.get());
 
-  m_dock->dock(ui::CENTER, m_customizableDockPlaceholder.get());
+  // The side panel docks beside the customizable layout, with a
+  // splitter of the layout's colour between them
+  m_panelDock = m_dock->center();
+  m_panelDock->dock(ui::CENTER, m_customizableDockPlaceholder.get());
 
   // After the user resizes the dock we save the updated layout
   m_saveDockLayoutConn = m_customizableDock->UserResizedDock.connect(&MainWindow::saveActiveLayout,
@@ -187,7 +191,7 @@ void MainWindow::initialize()
   // The side panel follows the colour bar to the other side, and
   // keeps the width the user gives it
   m_customizedDockConn = m_customizableDock->UserResizedDock.connect([this] { updateSidePanel(); });
-  m_sidePanelResizeConn = m_dock->UserResizedDock.connect([this] {
+  m_sidePanelResizeConn = m_panelDock->UserResizedDock.connect([this] {
     if (m_sidePanel)
       m_sidePanel->setWidth(m_sidePanel->bounds().w / guiscale());
   });
@@ -218,6 +222,7 @@ MainWindow::~MainWindow()
   m_sidePanelResizeConn.disconnect();
 
   m_dock->resetDocks();
+  m_panelDock = nullptr;
   m_sidePanel = nullptr;
   m_customizableDock->resetDocks();
 
@@ -502,7 +507,7 @@ void MainWindow::setCustomizeDock(bool enable)
 
 void MainWindow::updateSidePanel()
 {
-  if (!m_dock || !m_workspace)
+  if (!m_panelDock || !m_workspace)
     return;
 
   SidePanel* panel = nullptr;
@@ -512,7 +517,7 @@ void MainWindow::updateSidePanel()
   }
 
   if (m_sidePanel)
-    m_dock->undock(m_sidePanel);
+    undockSidePanel();
   m_sidePanel = panel;
 
   if (panel) {
@@ -522,7 +527,7 @@ void MainWindow::updateSidePanel()
     gfx::Size size(panel->width() * guiscale(), 0);
     if (size.w <= 0)
       size.w = panel->sizeHint().w;
-    m_dock->dock(side, panel, size);
+    m_panelDock->dock(side, panel, size);
   }
 
   layout();
@@ -532,9 +537,26 @@ void MainWindow::updateSidePanel()
 void MainWindow::removeSidePanel(SidePanel* panel)
 {
   if (m_sidePanel == panel) {
-    m_dock->undock(panel);
+    undockSidePanel();
     m_sidePanel = nullptr;
   }
+}
+
+void MainWindow::undockSidePanel()
+{
+  // No focus, mouse or capture stays on a widget that leaves the window
+  if (auto* man = manager()) {
+    auto inPanel = [this](ui::Widget* widget) {
+      return widget && (widget == m_sidePanel || widget->hasAncestor(m_sidePanel));
+    };
+    if (inPanel(man->getFocus()))
+      man->freeFocus();
+    if (inPanel(man->getMouse()))
+      man->freeMouse();
+    if (inPanel(man->getCapture()))
+      man->freeCapture();
+  }
+  m_panelDock->undock(m_sidePanel);
 }
 
 void MainWindow::dataRecoverySessionsAreReady()
@@ -559,6 +581,8 @@ void MainWindow::onInitTheme(ui::InitThemeEvent& ev)
 
   auto* theme = static_cast<skin::SkinTheme*>(this->theme());
   m_dock->setBgColor(theme->colors.windowFace());
+  if (m_panelDock)
+    m_panelDock->setBgColor(theme->colors.workspace());
   m_customizableDock->setBgColor(theme->colors.workspace());
 }
 
