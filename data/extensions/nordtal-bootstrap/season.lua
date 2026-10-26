@@ -578,6 +578,8 @@ function season.windowsHelper(target, staged, old, work)
     "@echo off",
     "setlocal DisableDelayedExpansion",
     "chcp 65001 >nul",
+    -- explorer.exe may start it in the folder it moves
+    'cd /d "%SystemRoot%"',
     "rem Nordtal Designer puts its new version in place once it has quit",
     'set "target=' .. target .. '"',
     'set "staged=' .. staged .. '"',
@@ -622,6 +624,10 @@ function season.install(update, target, done)
     return
   end
   makeAllDirectories(work)
+  if not isDirectory(work) then
+    done(false, { filePath(target) .. " can't be written to, so the update can't be put next to the app" })
+    return
+  end
   local function fail(err)
     removeTree(work)
     done(false, err)

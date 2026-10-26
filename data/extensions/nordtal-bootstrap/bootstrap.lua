@@ -13,6 +13,7 @@ local app, Dialog, Process = app, Dialog, Process
 local find, format, match = string.find, string.format, string.match
 local concat, insert = table.concat, table.insert
 local max = math.max
+local pcall = pcall
 local getenv = os.getenv
 local fs = app.fs
 local joinPath, isFile, isDirectory, listFiles, makeAllDirectories, chooseFolder =
@@ -368,11 +369,14 @@ function init(p)
   start()
 end
 
+-- The app calls exit() as it quits, and also when the extension is
+-- disabled; scripts learn of no other quit. The update goes first, so
+-- an error of the season's plugin can't lose it.
 function exit(p)
-  if exitPlugin then
-    exitPlugin()
-  end
   if season then
     season.finishInstall()
+  end
+  if exitPlugin then
+    pcall(exitPlugin)
   end
 end

@@ -515,6 +515,19 @@ do
   assert(not ok and err)
   assert(read(app.fs.joinPath(target, "version")) == "new")
   assert(not app.fs.isDirectory(old))
+
+  -- The new app can't leave a folder that can't be written, so the old
+  -- one goes back
+  local locked = app.fs.joinPath(dir, "locked")
+  staged = app.fs.joinPath(locked, "App")
+  write(app.fs.joinPath(staged, "version"), "newer")
+  assert(os.execute("chmod 555 " .. quote(locked)))
+  ok, err = season.replace(staged, target, old)
+  os.execute("chmod 755 " .. quote(locked))
+  assert(not ok and err == staged .. " could not be moved to " .. target, err)
+  assert(read(app.fs.joinPath(target, "version")) == "new")
+  assert(read(app.fs.joinPath(staged, "version")) == "newer")
+  assert(not app.fs.isDirectory(old))
 end
 
 -- On Windows a helper moves the new folder into place once the app
@@ -525,6 +538,8 @@ do
                                     "C:\\Apps\\.nordtal-designer-update\\old",
                                     "C:\\Apps\\.nordtal-designer-update")
   assert(text:find('@echo off\r\nsetlocal DisableDelayedExpansion\r\n', 1, true), text)
+  -- Not in the folder explorer.exe runs in, which may be the app's
+  assert(text:find('chcp 65001 >nul\r\ncd /d "%SystemRoot%"\r\n', 1, true), text)
   assert(text:find('set "target=C:\\Apps\\Nordtal Designer"\r\n', 1, true))
   assert(text:find('set "staged=C:\\Apps\\.nordtal-designer-update\\Nordtal Designer"\r\n', 1, true))
   assert(text:find('set "old=C:\\Apps\\.nordtal-designer-update\\old"\r\n', 1, true))
@@ -588,6 +603,14 @@ if app.os.macos then
   assert(not ok and table.concat(err, "\n"):find("checksum", 1, true))
   assert(read(exe) == "old")
   assert(not app.fs.isDirectory(work))
+
+  -- A folder of the app that can't be written says so before the download
+  assert(os.execute("chmod 555 " .. quote(apps)))
+  ok, err = install(update)
+  os.execute("chmod 755 " .. quote(apps))
+  assert(not ok and table.concat(err, "\n") == apps .. " can't be written to, so the update can't be put next to the app",
+         table.concat(err, "\n"))
+  assert(read(exe) == "old")
 
   -- A download that fails without a word says so
   ok, err = install({ tag="v1.3.18.6-designer.3", asset="gone.zip", sha256=sum })
