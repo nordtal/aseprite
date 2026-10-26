@@ -281,10 +281,16 @@ do
   local p = io.popen("shasum -a 256 " .. quote(archive))
   local sum = p:read("a"):match("^(%x+)")
   p:close()
-  local function answer(checksum)
+  local function answer(checksum, link)
     write(app.fs.joinPath(adoptium, "25", "hotspot"),
-          '[{"binary":{"package":{"name":"jdk.tar.gz","link":"file://' .. archive ..
+          '[{"binary":{"package":{"name":"jdk.tar.gz","link":"file://' .. (link or archive) ..
           '","checksum":"' .. checksum .. '"}},"release_name":"jdk-25.0.5+8"}]')
+  end
+  local function sha(fn)
+    local p = io.popen("shasum -a 256 " .. quote(fn))
+    local sum = p:read("a"):match("^(%x+)")
+    p:close()
+    return sum
   end
 
   -- A download that doesn't match the checksum is thrown away
@@ -293,6 +299,19 @@ do
   assert(home == nil and table.concat(err, "\n"):find("checksum", 1, true), err and table.concat(err, "\n"))
   assert(not app.fs.isDirectory(app.fs.joinPath(javaDir, "25")))
 
+  -- An archive without one JDK folder says so and leaves no unpacked
+  -- files behind
+  local twice = app.fs.joinPath(adoptium, "twice.tar.gz")
+  write(app.fs.joinPath(adoptium, "pkg", "other", "x"), "x")
+  assert(os.execute("tar -czf " .. quote(twice) .. " -C " .. quote(app.fs.joinPath(adoptium, "pkg")) ..
+                    " jdk-25.0.5+8 other"))
+  answer(sha(twice), twice)
+  home, err = java(clone)
+  assert(home == nil and table.concat(err, "\n"):find("JDK 25", 1, true), err and table.concat(err, "\n"))
+  assert(not app.fs.isDirectory(app.fs.joinPath(javaDir, "25.part")))
+
+  -- Files that an earlier unpack left behind don't stop the next one
+  app.fs.makeAllDirectories(app.fs.joinPath(javaDir, "25.part", "left-over"))
   answer(sum)
   home, err = java(clone)
   assert(home, err and table.concat(err, "\n"))
