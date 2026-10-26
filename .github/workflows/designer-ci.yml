@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         submodules: recursive
     - name: Install dependencies
@@ -28,7 +28,7 @@ jobs:
         skia_url=$(bash laf/misc/skia-url.sh release linux x64 | xargs)
         curl -L -o skia.zip "$skia_url"
         unzip -q skia.zip -d skia
-    - uses: hendrikmuhs/ccache-action@v1.2.23
+    - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
       with:
         key: designer-ci-linux
     - name: Configure
@@ -54,3 +54,48 @@ jobs:
         export ASEPRITE=$PWD/build/bin/aseprite
         cd tests
         xvfb-run -a bash run-tests.sh
+  # The allocator reuses a freed object's address at once, so a
+  # use-after-free in tests/cli/ui.sh only fails under AddressSanitizer,
+  # whose quarantine keeps the address out of reuse.
+  asan-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        submodules: recursive
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
+          libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev \
+          libfontconfig1-dev xvfb ninja-build
+    - name: Install Skia
+      run: |
+        skia_url=$(bash laf/misc/skia-url.sh release linux x64 | xargs)
+        curl -L -o skia.zip "$skia_url"
+        unzip -q skia.zip -d skia
+    - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      with:
+        key: designer-ci-linux-asan
+    - name: Configure
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+          -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address \
+          -DENABLE_CCACHE=on \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$PWD/skia \
+          -DSKIA_LIBRARY_DIR=$PWD/skia/out/Release-x64
+    - name: Build
+      run: ninja -C build aseprite
+    - name: UI tests
+      run: |
+        export ASEPRITE=$PWD/build/bin/aseprite
+        # Leaks at exit are not what this job looks for
+        export ASAN_OPTIONS=detect_leaks=0
+        cd tests
+        xvfb-run -a bash run-tests.sh cli/ui
