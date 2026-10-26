@@ -57,7 +57,9 @@ int generic_mt_index(lua_State* L)
     return 1;
   }
   luaL_traceback(L, L, nullptr, 1);
-  return luaL_error(L, "%s: Field '%s' does not exist", lua_tostring(L, -1), luaL_tolstring(L, 2, nullptr));
+  // The key's string is pushed first, then the traceback is at -2
+  const char* key = luaL_tolstring(L, 2, nullptr);
+  return luaL_error(L, "%s: Field '%s' does not exist", lua_tostring(L, -2), key);
 }
 
 int generic_mt_newindex(lua_State* L)
@@ -71,7 +73,9 @@ int generic_mt_newindex(lua_State* L)
     return 0;
   }
   luaL_traceback(L, L, nullptr, 1);
-  return luaL_error(L, "%s: Cannot set field '%s'", lua_tostring(L, -1), luaL_tolstring(L, 2, nullptr));
+  // The key's string is pushed first, then the traceback is at -2
+  const char* key = luaL_tolstring(L, 2, nullptr);
+  return luaL_error(L, "%s: Cannot set field '%s'", lua_tostring(L, -2), key);
 }
 
 } // anonymous namespace
