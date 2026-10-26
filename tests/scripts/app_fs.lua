@@ -83,3 +83,26 @@ do
   assert(not fs.isDirectory("_tmp/a"))
   assert(not fs.isDirectory("_tmp"))
 end
+
+-- Remove a folder with what it holds, without following its links
+do
+  assert(app.forkApiVersion >= 4)
+  assert(fs.makeAllDirectories("_tmp_tree/a/b"))
+  assert(fs.makeAllDirectories("_tmp_outside"))
+  local function write(fn) local f = io.open(fn, "w") f:write("x") f:close() end
+  write("_tmp_tree/a/b/file")
+  write("_tmp_outside/kept")
+  if not app.os.windows then
+    assert(os.execute("ln -s ../_tmp_outside _tmp_tree/a/link"))
+    assert(os.execute("ln -s ../_tmp_outside/kept _tmp_tree/filelink"))
+  end
+  assert(fs.removeTree("_tmp_tree"))
+  assert(not fs.isDirectory("_tmp_tree"))
+  assert(fs.isFile("_tmp_outside/kept"))
+  -- What isn't there is removed already; a file is no folder
+  assert(fs.removeTree("_tmp_tree"))
+  assert(not fs.removeTree("_tmp_outside/kept"))
+  assert(fs.isFile("_tmp_outside/kept"))
+  os.remove("_tmp_outside/kept")
+  assert(fs.removeDirectory("_tmp_outside"))
+end
