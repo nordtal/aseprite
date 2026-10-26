@@ -18,10 +18,13 @@ local ipairs, pairs, pcall, setmetatable, tonumber, tostring, type =
 local find, gsub, lower, match = string.find, string.gsub, string.lower, string.match
 local concat, insert = table.concat, table.insert
 local getinfo = debug.getinfo
-local remove = os.remove
+local lines = io.lines
+local getenv, remove, rename = os.getenv, os.remove, os.rename
 local fs = app.fs
 local joinPath, isFile, isDirectory = fs.joinPath, fs.isFile, fs.isDirectory
-local windows = app.os.windows
+local listFiles, makeAllDirectories, removeDirectory =
+      fs.listFiles, fs.makeAllDirectories, fs.removeDirectory
+local windows, macos, arm64 = app.os.windows, app.os.macos, app.os.arm64
 
 local season = {}
 
@@ -209,6 +212,160 @@ function season.clone(url, target, done)
                 "--config", "core.hooksPath=.githooks",
                 url, target },
               function(code, out, err) done(code == 0, err) end))
+end
+
+-- Steps that run one process after the other. steps:wait() waits
+-- for the last one, which a test needs.
+local function steps()
+  local s = {}
+  function s.run(cmd, done, cwd)
+    s.current = run(cmd, done, nil, cwd)
+  end
+  function s.wait()
+    local p
+    repeat
+      p = s.current
+      p:wait()
+    until s.current == p
+  end
+  return s
+end
+
+local adoptium = "https://api.adoptium.net/v3/assets/latest/"
+local javaRoot = joinPath(fs.userConfigPath, "java")
+
+local function system32(name)
+  return (joinPath(getenv("SystemRoot") or "C:\\Windows", "System32", name))
+end
+local curl = windows and system32("curl.exe") or "/usr/bin/curl"
+local tar = windows and system32("tar.exe") or "/usr/bin/tar"
+
+-- The version in the daemon JVM criteria that gradle updateDaemonJvm
+-- writes into the clone, or nil and the reason
+local function javaVersion(clone)
+  local fn = joinPath(clone, "gradle", "gradle-daemon-jvm.properties")
+  local ok, it = pcall(lines, fn)
+  if not ok then
+    return nil, "there is no " .. fn
+  end
+  for line in it do
+    local version = match(line, "^toolchainVersion=(.*)$")
+    if version then
+      if match(version, "^%d+$") then
+        return version
+      end
+      return nil, "toolchainVersion=" .. version .. " in " .. fn .. " is no number"
+    end
+  end
+  return nil, "there is no toolchainVersion in " .. fn
+end
+
+-- The JDK home in the folder of an unpacked JDK
+local function javaHome(dir)
+  local mac = joinPath(dir, "Contents", "Home")
+  if isDirectory(mac) then
+    return mac
+  end
+  return dir
+end
+
+local function hasJava(home)
+  return (isFile(joinPath(home, "bin", windows and "java.exe" or "java")))
+end
+
+-- The sha256 of a file, in lower case: cmd prints it, parse finds it
+local function sha256(fn)
+  if windows then
+    return { system32("certutil.exe"), "-hashfile", fn, "SHA256" }
+  end
+  if macos then
+    return { "/usr/bin/shasum", "-a", "256", fn }
+  end
+  return { "/usr/bin/sha256sum", fn }
+end
+
+local function parseSha256(out)
+  for _, line in ipairs(out) do
+    local hex = match(gsub(line, " ", ""), "^(%x+)")
+    if hex and #hex == 64 then
+      return (lower(hex))
+    end
+  end
+end
+
+-- done(home, err) with the home of the Eclipse Temurin JDK that the
+-- clone's daemon JVM criteria ask for. The first time it comes from
+-- the Adoptium API, checked against the API's sha256, into a folder
+-- of the app's config. The tools' environment gets it as JAVA_HOME,
+-- so gradlew runs with it. Returns the steps, or nil if done was
+-- called already.
+function season.java(clone, done)
+  local version, problem = javaVersion(clone)
+  if not version then
+    done(nil, { problem })
+    return
+  end
+  local target = joinPath(javaRoot, version)
+  local function finish()
+    local home = javaHome(target)
+    env.JAVA_HOME = home
+    done(home)
+  end
+  if hasJava(javaHome(target)) then
+    finish()
+    return
+  end
+
+  local s = steps()
+  local archive = target .. (windows and ".zip" or ".tar.gz")
+  local part = target .. ".part"
+  local function fail(err)
+    remove(archive)
+    done(nil, err)
+  end
+  makeAllDirectories(javaRoot)
+  local url = adoptium .. version .. "/hotspot?image_type=jdk&vendor=eclipse" ..
+              "&os=" .. (windows and "windows" or macos and "mac" or "linux") ..
+              "&architecture=" .. (arm64 and "aarch64" or "x64")
+  s.run({ curl, "-fsSL", url }, function(code, out, err)
+    if code ~= 0 then
+      fail(err)
+      return
+    end
+    local ok, list = pcall(json.decode, concat(out, "\n"))
+    local pkg = ok and list[1] and list[1].binary and list[1].binary.package
+    local checksum = pkg and pkg.checksum and lower(tostring(pkg.checksum))
+    if not checksum or not match(checksum, "^%x+$") or #checksum ~= 64 or not pkg.link then
+      fail({ "the Adoptium API has no JDK " .. version .. " for this computer" })
+      return
+    end
+    s.run({ curl, "-fsSL", "-o", archive, tostring(pkg.link) }, function(code, out, err)
+      if code ~= 0 then
+        fail(err)
+        return
+      end
+      s.run(sha256(archive), function(code, out, err)
+        if parseSha256(out) ~= checksum then
+          fail({ "the download of JDK " .. version .. " doesn't match its checksum" })
+          return
+        end
+        makeAllDirectories(part)
+        s.run({ tar, "-xf", archive, "-C", part }, function(code, out, err)
+          remove(archive)
+          local files = listFiles(part)
+          if code ~= 0 or #files ~= 1 or
+             not hasJava(javaHome(joinPath(part, files[1]))) or
+             not rename(joinPath(part, files[1]), target) then
+            done(nil, err)
+            return
+          end
+          removeDirectory(part)
+          finish()
+        end)
+      end)
+    end)
+  end)
+  return s
 end
 
 function season.isClone(target)

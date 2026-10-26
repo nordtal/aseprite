@@ -45,6 +45,8 @@ local strings = {
     notAClone = "%s exists and isn't a clone. Choose another folder.",
     commandLineTools = "Git needs the Command Line Tools. Install them in the window macOS shows, then click Clone again.",
     pluginFailed = "The plugin of the season repository failed to load:",
+    java = "Downloading Java for Gradle...",
+    javaFailed = "Java for Gradle could not be set up:",
     changeFolder = "Nordtal Folder...",
   },
   de = {
@@ -70,6 +72,8 @@ local strings = {
     notAClone = "%s gibt es schon, und es ist kein Klon. Wähle einen anderen Ordner.",
     commandLineTools = "Git braucht die Command Line Tools. Installiere sie in dem Fenster, das macOS zeigt, und klicke dann erneut auf Klonen.",
     pluginFailed = "Das Plugin des Saison-Repositorys konnte nicht geladen werden:",
+    java = "Java für Gradle wird heruntergeladen...",
+    javaFailed = "Java für Gradle konnte nicht eingerichtet werden:",
     changeFolder = "Nordtal-Ordner...",
   },
 }
@@ -115,7 +119,29 @@ end
 
 local start, signIn, findSeason, offerClone
 
-local function loadPlugin(dir, repo)
+local loadPlugin
+
+-- The JDK that gradlew in the clone runs with, then the plugin
+local function setUp(dir, repo)
+  local steps = season.java(dir, function(home, err)
+    if home then
+      if dlg then dlg:close() end
+      loadPlugin(dir, repo)
+      return
+    end
+    show(function(d)
+      d:label{ text=tr("javaFailed") }
+      addLines(d, err or {})
+      d:button{ text=tr("tryAgain"), onclick=function() setUp(dir, repo) end }
+      d:button{ text=tr("close") }
+    end)
+  end)
+  if steps then
+    show(function(d) d:label{ text=tr("java") } end)
+  end
+end
+
+loadPlugin = function(dir, repo)
   local msg
   exitPlugin, msg = season.loadPlugin(dir, plugin, {
     repository=season.org .. "/" .. repo.name,
@@ -138,7 +164,7 @@ offerClone = function(repo, problem)
   local dir = joinPath(root, repo.name)
   if season.isClone(dir) then
     if dlg then dlg:close() end
-    loadPlugin(dir, repo)
+    setUp(dir, repo)
     return
   end
   show(function(d)
@@ -164,8 +190,7 @@ offerClone = function(repo, problem)
       show(function(d2) d2:label{ text=tr("cloning", repo.name) } end)
       season.clone(season.url(repo), dir, function(ok, err)
         if ok then
-          if dlg then dlg:close() end
-          loadPlugin(dir, repo)
+          setUp(dir, repo)
           return
         end
         local text = concat(err, "\n")
