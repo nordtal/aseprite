@@ -34,6 +34,7 @@ struct TreeNode {
 };
 
 using TreeNodes = std::vector<std::unique_ptr<TreeNode>>;
+using TreeRows = std::vector<std::pair<TreeNode*, int>>; // Visible nodes and their depth
 
 // Where a row paints its badge and its label. The badge sits at the
 // right of the part of the row that the view shows, the label ends
@@ -51,7 +52,6 @@ TreeRowLayout tree_row_layout(const gfx::Rect& row,
                               int labelX,
                               int badgeTextWidth,
                               int pad);
-using TreeRows = std::vector<std::pair<TreeNode*, int>>; // Visible nodes and their depth
 
 // The nodes of a tree, its visible rows and its selection, without
 // the widget that paints them.
