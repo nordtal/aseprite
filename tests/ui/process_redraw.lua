@@ -13,8 +13,10 @@ ui_test(function()
   local b = dlg.bounds
   dlg.bounds = Rectangle(8, 40, b.width, b.height)
 
-  -- true if the screen shows the canvas green. The screenshot is
-  -- converted to sRGB, which rounds the colors.
+  -- true if the screen shows the canvas green. The screenshot passes
+  -- through the display's color profile, which can turn pure green
+  -- into (9, 251, 48). The bounds leave room for that and stay far
+  -- from the red the canvas shows before the change.
   local function shown()
     app.command.Screenshot()
     local img = app.image
@@ -23,8 +25,8 @@ ui_test(function()
     for y = b.y, b.y + b.height - 1 do
       for x = b.x, b.x + b.width - 1 do
         local c = img:getPixel(x, y)
-        if app.pixelColor.rgbaR(c) < 16 and app.pixelColor.rgbaG(c) > 240 and
-           app.pixelColor.rgbaB(c) < 16 then
+        if app.pixelColor.rgbaR(c) < 64 and app.pixelColor.rgbaG(c) > 192 and
+           app.pixelColor.rgbaB(c) < 64 then
           found = true
         end
       end
