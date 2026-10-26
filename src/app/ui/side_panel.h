@@ -37,6 +37,12 @@ public:
   void setDefaultWidth(int width) { m_width = width; }
   void setWidthKey(const std::string& key, bool kept);
 
+  // Moves the widget above, which the panel holds, and the widget
+  // below into a splitter that the user drags to share the panel's
+  // height between them. It starts at half, and the panel keeps where
+  // the user dragged it under its width key.
+  void split(ui::Widget* above, ui::Widget* below);
+
   // Dockable implementation
   int dockableAt() const override { return ui::LEFT | ui::RIGHT | ui::EXPANSIVE; }
   int dockHandleSide() const override { return 0; }
@@ -46,6 +52,12 @@ protected:
   void onPaint(ui::PaintEvent& ev) override;
 
 private:
+  class Splitter;
+
+  // The value under the width key in section, or 0 if there's none
+  double kept(const char* section) const;
+  void keep(const char* section, double value);
+
   int m_side = ui::LEFT;
   int m_width = 0;
   std::string m_widthKey;

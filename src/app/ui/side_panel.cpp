@@ -17,15 +17,53 @@
 #include "ui/graphics.h"
 #include "ui/paint_event.h"
 #include "ui/scale.h"
+#include "ui/splitter.h"
 
 #include <map>
 
 namespace app {
 
 static constexpr auto kWidthSection = "layout:side_panel";
+static constexpr auto kSplitSection = "layout:side_panel_split";
 
-// The widths of the panels that keep theirs for the session only
-static std::map<std::string, int> g_sessionWidths;
+// The values of the panels that keep theirs for the session only, by
+// section and key
+static std::map<std::pair<std::string, std::string>, double> g_session;
+
+// A splitter that the panel keeps the position of once the user drags
+// it
+class SidePanel::Splitter : public ui::Splitter {
+public:
+  explicit Splitter(SidePanel* panel) : ui::Splitter(ByPercentage, ui::VERTICAL), m_panel(panel)
+  {
+    setExpansive(true);
+    initTheme();
+  }
+
+private:
+  // The panel's face, and the bar between the parts in the colour of
+  // the dock's splitter beside the panel
+  void onPaint(ui::PaintEvent& ev) override
+  {
+    auto* g = ev.graphics();
+    auto* theme = skin::SkinTheme::get(this);
+    g->fillRect(theme->colors.windowFace(), clientBounds());
+    if (children().size() == 2) {
+      const int y = children()[0]->bounds().y2() - bounds().y;
+      g->fillRect(theme->colors.workspace(),
+                  gfx::Rect(0, y, bounds().w, children()[1]->bounds().y - children()[0]->bounds().y2()));
+    }
+  }
+
+  void onPositionChange() override
+  {
+    ui::Splitter::onPositionChange();
+    if (hasCapture())
+      m_panel->keep(kSplitSection, getPosition());
+  }
+
+  SidePanel* m_panel;
+};
 
 SidePanel::SidePanel()
 {
@@ -60,23 +98,42 @@ void SidePanel::setWidthKey(const std::string& key, bool kept)
   m_widthKept = kept;
 }
 
+double SidePanel::kept(const char* section) const
+{
+  if (m_widthKept)
+    return get_config_double(section, m_widthKey.c_str(), 0);
+  auto it = g_session.find({ section, m_widthKey });
+  return (it != g_session.end() ? it->second : 0);
+}
+
+void SidePanel::keep(const char* section, double value)
+{
+  if (m_widthKept)
+    set_config_double(section, m_widthKey.c_str(), value);
+  else
+    g_session[{ section, m_widthKey }] = value;
+}
+
 int SidePanel::width() const
 {
-  int width = 0;
-  if (m_widthKept)
-    width = get_config_int(kWidthSection, m_widthKey.c_str(), 0);
-  else if (auto it = g_sessionWidths.find(m_widthKey); it != g_sessionWidths.end())
-    width = it->second;
+  const int width = int(kept(kWidthSection));
   return (width > 0 ? width : m_width);
 }
 
 void SidePanel::setWidth(int width)
 {
   m_width = width;
-  if (m_widthKept)
-    set_config_int(kWidthSection, m_widthKey.c_str(), width);
-  else
-    g_sessionWidths[m_widthKey] = width;
+  keep(kWidthSection, width);
+}
+
+void SidePanel::split(ui::Widget* above, ui::Widget* below)
+{
+  auto splitter = new Splitter(this);
+  const double position = kept(kSplitSection);
+  splitter->setPosition(position > 0 ? position : 50);
+  replaceChild(above, splitter);
+  splitter->addChild(above);
+  splitter->addChild(below);
 }
 
 } // namespace app
