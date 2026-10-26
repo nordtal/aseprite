@@ -268,7 +268,10 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
       // Window::closeWindow(), which keeps the native frame
       if (ownDisplay())
         loadNativeFrame(display()->nativeWindow()->frame());
-      if (preview_place_changed(m_openBounds, m_openFrame, bounds(), lastNativeFrame()))
+      if (preview_place_changed(m_openBounds,
+                                m_openFrame,
+                                bounds(),
+                                ownDisplay() ? lastNativeFrame() : gfx::Rect()))
         save_window_pos(this, "PreviewWindow");
       break;
   }
