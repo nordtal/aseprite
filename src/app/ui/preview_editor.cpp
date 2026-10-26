@@ -24,7 +24,6 @@
 #include "app/ui/editor/editor_view.h"
 #include "app/ui/editor/play_state.h"
 #include "app/ui/skin/skin_theme.h"
-#include "app/ui/status_bar.h"
 #include "app/ui/toolbar.h"
 #include "app/ui_context.h"
 #include "doc/sprite.h"
@@ -37,6 +36,8 @@
 #include "ui/system.h"
 
 #include "doc/tag.h"
+
+#include <algorithm>
 
 namespace app {
 
@@ -218,6 +219,14 @@ void PreviewEditorWindow::pressPlayButton()
   onPlayClicked();
 }
 
+gfx::Rect default_preview_bounds(const gfx::Rect& editorView, const gfx::Size& size, int gap)
+{
+  return gfx::Rect(std::max(editorView.x, editorView.x2() - gap - size.w),
+                   std::max(editorView.y, editorView.y2() - gap - size.h),
+                   size.w,
+                   size.h);
+}
+
 bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
@@ -225,18 +234,17 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
       Manager* manager = this->manager();
       Display* mainDisplay = manager->display();
 
-      gfx::Rect defaultBounds(mainDisplay->size() / 4);
       auto theme = SkinTheme::get(this);
-      gfx::Rect mainWindow = manager->bounds();
-
       int extra = theme->dimensions.miniScrollbarSize();
       if (get_multiple_displays()) {
         extra *= mainDisplay->scale();
       }
-      defaultBounds.x = mainWindow.x2() - ToolBar::instance()->sizeHint().w - defaultBounds.w -
-                        extra;
-      defaultBounds.y = mainWindow.y2() - StatusBar::instance()->sizeHint().h - defaultBounds.h -
-                        extra;
+
+      // Over the editor, whatever is docked around it
+      gfx::Rect area = manager->bounds();
+      if (View* view = (m_relatedEditor ? View::getView(m_relatedEditor) : nullptr))
+        area = view->viewportBounds();
+      gfx::Rect defaultBounds = default_preview_bounds(area, mainDisplay->size() / 4, extra);
 
       fit_bounds(mainDisplay, this, defaultBounds);
 
@@ -245,7 +253,10 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
       break;
     }
 
-    case kCloseMessage: save_window_pos(this, "MiniEditor"); break;
+    case kCloseMessage:
+      if (m_moved)
+        save_window_pos(this, "MiniEditor");
+      break;
   }
 
   return Window::onProcessMessage(msg);
@@ -281,6 +292,12 @@ void PreviewEditorWindow::onWindowResize()
   DocView* view = UIContext::instance()->activeView();
   if (view)
     updateUsingEditor(view->editor());
+}
+
+void PreviewEditorWindow::onWindowMovement()
+{
+  Window::onWindowMovement();
+  m_moved = true;
 }
 
 bool PreviewEditorWindow::hasDocument() const
