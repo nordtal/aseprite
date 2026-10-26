@@ -22,8 +22,8 @@ local lines = io.lines
 local getenv, remove, rename = os.getenv, os.remove, os.rename
 local fs = app.fs
 local joinPath, isFile, isDirectory = fs.joinPath, fs.isFile, fs.isDirectory
-local listFiles, makeAllDirectories, removeDirectory =
-      fs.listFiles, fs.makeAllDirectories, fs.removeDirectory
+local listFiles, makeAllDirectories, removeTree =
+      fs.listFiles, fs.makeAllDirectories, fs.removeTree
 local windows, macos, arm64 = app.os.windows, app.os.macos, app.os.arm64
 
 local season = {}
@@ -284,14 +284,6 @@ local function sha256(fn)
   return { "/usr/bin/sha256sum", fn }
 end
 
--- Removes a folder and what it holds, without following its links
-local function removeTree(dir)
-  if windows then
-    return { system32("cmd.exe"), "/d", "/c", "rmdir", "/s", "/q", dir }
-  end
-  return { "/bin/rm", "-rf", dir }
-end
-
 local function parseSha256(out)
   for _, line in ipairs(out) do
     local hex = match(gsub(line, " ", ""), "^(%x+)")
@@ -358,27 +350,28 @@ function season.java(clone, done)
           return
         end
         -- The archive is unpacked into an empty folder, which a failed
-        -- try leaves behind with whatever it unpacked
-        s.run(removeTree(part), function()
-          makeAllDirectories(part)
-          s.run({ tar, "-xf", archive, "-C", part }, function(code, out, err)
-            remove(archive)
-            local files = listFiles(part)
-            local problem
-            if code ~= 0 then
-              problem = err[1] and err or { "JDK " .. version .. " could not be unpacked" }
-            elseif #files ~= 1 or not hasJava(javaHome(joinPath(part, files[1]))) then
-              problem = { "the download of JDK " .. version .. " holds no single JDK folder" }
-            elseif not rename(joinPath(part, files[1]), target) then
-              problem = { "JDK " .. version .. " could not be moved to " .. target }
-            end
-            if problem then
-              s.run(removeTree(part), function() done(nil, problem) end)
-              return
-            end
-            removeDirectory(part)
-            finish()
-          end)
+        -- try leaves behind with whatever it unpacked. A target without
+        -- java is what a failed try left, too.
+        removeTree(part)
+        removeTree(target)
+        makeAllDirectories(part)
+        s.run({ tar, "-xf", archive, "-C", part }, function(code, out, err)
+          remove(archive)
+          local files = listFiles(part)
+          local problem
+          if code ~= 0 then
+            problem = err[1] and err or { "JDK " .. version .. " could not be unpacked" }
+          elseif #files ~= 1 or not hasJava(javaHome(joinPath(part, files[1]))) then
+            problem = { "the download of JDK " .. version .. " holds no single JDK folder" }
+          elseif not rename(joinPath(part, files[1]), target) then
+            problem = { "JDK " .. version .. " could not be moved to " .. target }
+          end
+          removeTree(part)
+          if problem then
+            done(nil, problem)
+            return
+          end
+          finish()
         end)
       end)
     end)

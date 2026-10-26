@@ -314,8 +314,10 @@ do
   assert(home == nil and table.concat(err, "\n"):find("JDK 25", 1, true), err and table.concat(err, "\n"))
   assert(not app.fs.isDirectory(app.fs.joinPath(javaDir, "25.part")))
 
-  -- Files that an earlier unpack left behind don't stop the next one
+  -- Files that an earlier unpack left behind don't stop the next one,
+  -- nor does a JDK folder without java
   app.fs.makeAllDirectories(app.fs.joinPath(javaDir, "25.part", "left-over"))
+  app.fs.makeAllDirectories(app.fs.joinPath(javaDir, "25", "stale"))
   answer(sum)
   home, err = java(clone)
   assert(home, err and table.concat(err, "\n"))
