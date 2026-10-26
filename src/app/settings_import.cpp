@@ -45,25 +45,24 @@ static bool same_directory(const std::string& a, const std::string& b)
   return fs::equivalent(fs::u8path(a), fs::u8path(b), ec);
 }
 
-// True if path is dir or lies inside it, after resolving symlinks
+// True if path is dir or lies inside it. Each parent of path is
+// compared with dir as a file, so other names of dir count too: a
+// symlink, other cases on a file system that ignores them, a mount.
 static bool inside(const std::string& dir, const std::string& path)
 {
   std::error_code ec;
-  const fs::path d = fs::weakly_canonical(fs::u8path(dir), ec);
-  if (ec || d.empty())
-    return false;
-  const fs::path p = fs::weakly_canonical(fs::u8path(path), ec);
+  const fs::path d = fs::u8path(dir);
+  fs::path p = fs::weakly_canonical(fs::u8path(path), ec);
   if (ec)
     return false;
-  auto it = p.begin();
-  for (const auto& part : d) {
-    if (part.empty())
-      continue;
-    if (it == p.end() || *it != part)
+  for (;;) {
+    if (fs::equivalent(d, p, ec))
+      return true;
+    const fs::path parent = p.parent_path();
+    if (parent.empty() || parent == p)
       return false;
-    ++it;
+    p = parent;
   }
-  return true;
 }
 
 // The import into "to" copies nothing onto itself or into itself

@@ -223,3 +223,29 @@ TEST(SettingsImport, DropsScriptAccessFromAReadOnlyIni)
   copy.getAllSections(sections);
   EXPECT_EQ((std::vector<std::string>{ "general" }), sections);
 }
+
+TEST(SettingsImport, RefusesATargetInsideTheSourceUnderAnotherName)
+{
+  namespace fs = std::filesystem;
+  const std::string from = fresh_dir("outer");
+  write(from, "palettes/a.gpl", "GIMP Palette\n");
+
+  // Other names of the same directory: a file system that ignores case
+  // takes it in other cases, and macOS reaches its data volume through
+  // /System/Volumes/Data too
+  const fs::path real = fs::canonical(fs::u8path(from));
+  const fs::path aliases[] = { real.parent_path() / "settings_import_tests_OUTER",
+                               fs::path("/System/Volumes/Data") / real.relative_path() };
+  int tried = 0;
+  for (const fs::path& alias : aliases) {
+    std::error_code ec;
+    if (!fs::equivalent(real, alias, ec))
+      continue;
+    ++tried;
+    const fs::path to = alias / "palettes" / "inner";
+    EXPECT_FALSE(import_aseprite_settings(from, to.u8string())) << to;
+    EXPECT_FALSE(fs::exists(to)) << to;
+  }
+  if (!tried)
+    GTEST_SKIP();
+}
