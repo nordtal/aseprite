@@ -583,6 +583,7 @@ target_sources(app-lib PRIVATE
   res/resources_loader.cpp
   resource_finder.cpp
   restore_visible_layers.cpp
+  settings_import.cpp
   shade.cpp
   site.cpp
   snap_to_grid.cpp
