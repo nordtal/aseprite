@@ -95,6 +95,10 @@ private:
                                       const gfx::Rect& separator,
                                       const int index)> f);
 
+  // Drops the splitter under the mouse or dragged if it belongs to
+  // the widget, which is about to be undocked.
+  void forgetHit(ui::Widget* widget);
+
   bool hasVisibleSide(const int i) const { return (m_sides[i] && m_sides[i]->isVisible()); }
   void redockWidget(app::Dock* widgetDock, ui::Widget* dockableWidget, const int side);
 
