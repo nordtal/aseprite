@@ -1564,6 +1564,10 @@ int Dialog_tree(lua_State* L)
     }
     lua_pop(L, 1);
 
+    if (lua_getfield(L, 2, "width") == LUA_TNUMBER)
+      widget->setPreferredWidth(lua_tointeger(L, -1) * ui::guiscale());
+    lua_pop(L, 1);
+
     if (lua_getfield(L, 2, "height") == LUA_TNUMBER)
       widget->setMinSize(gfx::Size(0, lua_tointeger(L, -1) * ui::guiscale()));
     lua_pop(L, 1);
@@ -1968,6 +1972,13 @@ int Dialog_modify(lua_State* L)
       TreeNodes nodes;
       parse_tree_nodes(L, -1, nodes);
       static_cast<Tree*>(widget)->model().setChildren(nullptr, std::move(nodes));
+    }
+    lua_pop(L, 1);
+
+    type = lua_getfield(L, 2, "width");
+    if (type == LUA_TNUMBER && widget->type() == Tree::Type()) {
+      static_cast<Tree*>(widget)->setPreferredWidth(lua_tointeger(L, -1) * ui::guiscale());
+      relayout = true;
     }
     lua_pop(L, 1);
 

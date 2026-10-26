@@ -24,6 +24,7 @@
 // 3: Process{ env }
 // 4: app.fs.removeTree(), require() in a trusted chunk of a file and
 //    plugin.require() of the season plugin
-#define FORK_API_VERSION 4
+// 5: Dialog:tree{ width } and Dialog:modify{ id, width } of a tree
+#define FORK_API_VERSION 5
 
 #endif

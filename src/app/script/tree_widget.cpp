@@ -374,13 +374,22 @@ Tree::Tree() : m_content(new Content(m_model, this))
   initTheme();
 }
 
+void Tree::setPreferredWidth(const int width)
+{
+  m_preferredWidth = std::max(0, width);
+  invalidate();
+}
+
 void Tree::onSizeHint(SizeHintEvent& ev)
 {
   // A view asks for no room for its content, the tree asks for its
   // width and leaves the height to the dialog
   View::onSizeHint(ev);
   gfx::Size sz = ev.sizeHint();
-  sz.w += m_content->sizeHint().w + theme()->getScrollbarSize();
+  if (m_preferredWidth > 0)
+    sz.w = m_preferredWidth;
+  else
+    sz.w += m_content->sizeHint().w + theme()->getScrollbarSize();
   ev.setSizeHint(sz);
 }
 
