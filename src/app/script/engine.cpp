@@ -126,7 +126,7 @@ int dofile(lua_State* L)
   }
 
   lua_settop(L, 1);
-  if (luaL_loadfile(L, fname.c_str()) != LUA_OK)
+  if (luaL_loadfilex(L, fname.c_str(), "t") != LUA_OK)
     return lua_error(L);
   {
     AddScriptFilename add(fname);
@@ -576,7 +576,7 @@ bool Engine::evalCode(const std::string& code, const std::string& filename, int*
 {
   bool ok = true;
   try {
-    const int status = luaL_loadbuffer(L, code.c_str(), code.size(), filename.c_str());
+    const int status = luaL_loadbufferx(L, code.c_str(), code.size(), filename.c_str(), "t");
     if (status == LUA_OK && trustedEnv) {
       trust_chunk(L, -1);
       *trustedEnv = luaL_ref(L, LUA_REGISTRYINDEX);

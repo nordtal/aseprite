@@ -910,7 +910,7 @@ void Extension::initScripts()
     const std::string& fn = base::join_path(m_path, kPrefLua);
     if (base::is_file(fn)) {
       lua_rawgeti(L, LUA_REGISTRYINDEX, m_plugin.pluginRef);
-      if (luaL_loadfile(L, fn.c_str()) == LUA_OK) {
+      if (luaL_loadfilex(L, fn.c_str(), "t") == LUA_OK) {
         if (lua_pcall(L, 0, 1, 0) == LUA_OK) {
           lua_setfield(L, -2, "preferences");
         }

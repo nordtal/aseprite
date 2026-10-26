@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 namespace app { namespace script {
 
@@ -44,6 +45,8 @@ int secure_os_execute(lua_State* L);
 int secure_os_remove(lua_State* L);
 int secure_os_rename(lua_State* L);
 int secure_package_loadlib(lua_State* L);
+int text_load(lua_State* L);
+int text_loadfile(lua_State* L);
 
 enum {
   io_open,
@@ -55,6 +58,8 @@ enum {
   os_remove,
   os_rename,
   package_loadlib,
+  base_load,
+  base_loadfile,
 };
 
 static struct {
@@ -72,6 +77,8 @@ static struct {
   { "os",      "remove",  secure_os_remove       },
   { "os",      "rename",  secure_os_rename       },
   { "package", "loadlib", secure_package_loadlib },
+  { "_G",      "load",    text_load              },
+  { "_G",      "loadfile", text_loadfile         },
 };
 
 // Map from .lua file name -> sha1
@@ -272,6 +279,136 @@ int secure_package_loadlib(lua_State* L)
   return replaced_functions[package_loadlib].origfunc(L);
 }
 
+// The app loads text chunks only: a precompiled chunk can do what no
+// script can, such as reading and writing memory it doesn't own. The
+// mode argument at index mode is "t", and refused if it asks for "b".
+void text_mode(lua_State* L, int mode)
+{
+  if (!lua_isnoneornil(L, mode) && std::strchr(luaL_checkstring(L, mode), 'b'))
+    luaL_error(L, "the app loads text chunks only, not mode '%s'", lua_tostring(L, mode));
+  if (lua_gettop(L) < mode)
+    lua_settop(L, mode);
+  lua_pushliteral(L, "t");
+  lua_replace(L, mode);
+}
+
+int text_load(lua_State* L)
+{
+  text_mode(L, 3);
+  return replaced_functions[base_load].origfunc(L);
+}
+
+int text_loadfile(lua_State* L)
+{
+  text_mode(L, 2);
+  return replaced_functions[base_loadfile].origfunc(L);
+}
+
+// package.searchers[2]: a Lua module from package.path, as a text
+// chunk. The upvalues are the package table and package.searchpath().
+int text_lua_searcher(lua_State* L)
+{
+  const char* name = luaL_checkstring(L, 1);
+  if (lua_getfield(L, lua_upvalueindex(1), "path") != LUA_TSTRING)
+    return luaL_error(L, "'package.path' must be a string");
+  lua_pushvalue(L, lua_upvalueindex(2));
+  lua_pushvalue(L, 1);
+  lua_pushvalue(L, -3);
+  lua_call(L, 2, 2);
+  if (lua_isnil(L, -2))
+    return 1; // Where it looked
+  lua_pop(L, 1);
+  const char* filename = lua_tostring(L, -1);
+  if (luaL_loadfilex(L, filename, "t") != LUA_OK)
+    return luaL_error(L,
+                      "error loading module '%s' from file '%s':\n\t%s",
+                      name,
+                      filename,
+                      lua_tostring(L, -1));
+  lua_insert(L, -2);
+  return 2;
+}
+
+// The level of the stack that require() was called from, for
+// ask_access(): the first Lua function that isn't the app's own
+// require()
+int require_caller_level(lua_State* L)
+{
+  lua_Debug ar;
+  for (int level = 0; lua_getstack(L, level, &ar); ++level) {
+    if (lua_getinfo(L, "S", &ar) && *ar.what != 'C' && std::strcmp(ar.source, "internal") != 0)
+      return level + 1;
+  }
+  return 0;
+}
+
+// package.searchers[3] and [4]: a C module from the package.cpath the
+// app started with, which no script changes, loaded only with the
+// access to load libraries that package.loadlib() asks for. The
+// upvalues are that cpath, package.searchpath() and whether the
+// module is the root of the name (searchers[4]).
+int fixed_c_searcher(lua_State* L)
+{
+  const std::string name = luaL_checkstring(L, 1);
+  std::string lookup = name;
+  const bool root = lua_toboolean(L, lua_upvalueindex(3));
+  if (root) {
+    const size_t dot = name.find('.');
+    if (dot == std::string::npos)
+      return 0;
+    lookup.resize(dot);
+  }
+  lua_pushvalue(L, lua_upvalueindex(2));
+  lua_pushstring(L, lookup.c_str());
+  lua_pushvalue(L, lua_upvalueindex(1));
+  lua_call(L, 2, 2);
+  if (lua_isnil(L, -2))
+    return 1; // Where it looked
+  lua_pop(L, 1);
+  const std::string filename = lua_tostring(L, -1);
+
+  if (!ask_access(L,
+                  filename.c_str(),
+                  FileAccessMode::LoadLib,
+                  ResourceType::File,
+                  require_caller_level(L)))
+    return luaL_error(L, "the script doesn't have access to load the library '%s'", filename.c_str());
+
+  // The open function, as Lua names it: luaopen_ and the name with
+  // "_" for ".", first without what follows a "-", then without what
+  // precedes it
+  std::string mod = name;
+  std::replace(mod.begin(), mod.end(), '.', '_');
+  std::vector<std::string> names;
+  const size_t mark = mod.find('-');
+  if (mark != std::string::npos) {
+    names.push_back(mod.substr(0, mark));
+    mod = mod.substr(mark + 1);
+  }
+  names.push_back(mod);
+  for (const std::string& n : names) {
+    lua_pushcfunction(L, replaced_functions[package_loadlib].origfunc);
+    lua_pushstring(L, filename.c_str());
+    lua_pushstring(L, ("luaopen_" + n).c_str());
+    lua_call(L, 2, 3);
+    if (lua_isfunction(L, -3)) {
+      lua_pop(L, 2);
+      lua_pushstring(L, filename.c_str());
+      return 2;
+    }
+    const bool noFunction = (lua_tostring(L, -1) && std::strcmp(lua_tostring(L, -1), "init") == 0);
+    if (!noFunction || (&n == &names.back() && !root))
+      return luaL_error(L,
+                        "error loading module '%s' from file '%s':\n\t%s",
+                        name.c_str(),
+                        filename.c_str(),
+                        lua_tostring(L, -2));
+    lua_pop(L, 3);
+  }
+  lua_pushfstring(L, "no module '%s' in file '%s'", name.c_str(), filename.c_str());
+  return 1;
+}
+
 } // anonymous namespace
 
 void overwrite_unsecure_functions(lua_State* L)
@@ -321,6 +458,24 @@ void overwrite_unsecure_functions(lua_State* L)
 
     lua_pop(L, 1);
   }
+
+  // require() loads text chunks, and C modules only from where the
+  // app looks for them and with access
+  lua_getglobal(L, LUA_LOADLIBNAME);
+  const int package = lua_gettop(L);
+  lua_getfield(L, package, "searchers");
+  lua_pushvalue(L, package);
+  lua_getfield(L, package, "searchpath");
+  lua_pushcclosure(L, text_lua_searcher, 2);
+  lua_rawseti(L, -2, 2);
+  for (int i : { 3, 4 }) {
+    lua_getfield(L, package, "cpath");
+    lua_getfield(L, package, "searchpath");
+    lua_pushboolean(L, i == 4);
+    lua_pushcclosure(L, fixed_c_searcher, 3);
+    lua_rawseti(L, -2, i);
+  }
+  lua_pop(L, 2);
 }
 
 bool ask_access(lua_State* L,
