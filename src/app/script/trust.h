@@ -8,6 +8,7 @@
 #define APP_SCRIPT_TRUST_H_INCLUDED
 #pragma once
 
+#include "app/script/security.h"
 #include "lua.h"
 
 namespace app { namespace script {
@@ -48,6 +49,15 @@ void trust_chunk(lua_State* L, int idx);
 // called (the app called it back), as the stack doesn't show what it
 // runs for; only the C function that asks is exempt.
 bool is_trusted_call(lua_State* L);
+
+// True when a trusted call gets the access mode to resource without
+// asking: it reads, writes and runs programs like the app itself, and
+// opens a WebSocket to the loopback host, 127.0.0.1 or localhost, as
+// the socket parses its URL. The socket follows HTTP redirects, so the
+// listener there can send it on to any host; that is accepted, because
+// a trusted call already runs programs without asking and a hostile
+// local listener already has the network.
+bool is_trusted_access(lua_State* L, FileAccessMode mode, const char* resource);
 
 }} // namespace app::script
 

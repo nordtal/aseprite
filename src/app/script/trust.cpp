@@ -15,6 +15,10 @@
 #include "lstate.h"
 #include "lualib.h"
 
+#ifdef ENABLE_WEBSOCKET
+  #include <ixwebsocket/IXUrlParser.h>
+#endif
+
 #include <algorithm>
 #include <filesystem>
 #include <string>
@@ -406,6 +410,24 @@ bool is_trusted_call(lua_State* L)
   }
   lua_pop(L, 1);
   return trusted;
+}
+
+bool is_trusted_access(lua_State* L, FileAccessMode mode, const char* resource)
+{
+  switch (mode) {
+    case FileAccessMode::Read:
+    case FileAccessMode::Write:
+    case FileAccessMode::Execute: return is_trusted_call(L);
+#ifdef ENABLE_WEBSOCKET
+    case FileAccessMode::OpenSocket: {
+      std::string protocol, host, path, query;
+      int port;
+      return resource && ix::UrlParser::parse(resource, protocol, host, path, query, port) &&
+             (host == "127.0.0.1" || host == "localhost") && is_trusted_call(L);
+    }
+#endif
+    default: return false;
+  }
 }
 
 }} // namespace app::script
