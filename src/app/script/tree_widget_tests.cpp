@@ -100,3 +100,59 @@ TEST(TreeModel, CollapseAfterChangeRemovedTheNode)
   model.toggle(model.findNode("a"));
   EXPECT_EQ(0, expands);
 }
+
+// A row of 1000 px in a tree that shows 100 px of it: the badge of 6
+// px of text and 2 px of padding ends 2 px before the right edge of
+// what the view shows, wherever it's scrolled, and the label ends 2
+// px before the badge.
+
+TEST(TreeRowLayout, FixedWidthUnscrolled)
+{
+  const TreeRowLayout layout =
+    tree_row_layout(gfx::Rect(0, 32, 1000, 16), gfx::Rect(0, 0, 100, 80), 14, 6, 2);
+  EXPECT_EQ(gfx::Rect(88, 33, 10, 14), layout.badge);
+  EXPECT_EQ(gfx::Rect(14, 32, 72, 16), layout.label);
+}
+
+TEST(TreeRowLayout, FixedWidthScrolled)
+{
+  const TreeRowLayout layout =
+    tree_row_layout(gfx::Rect(0, 32, 1000, 16), gfx::Rect(300, 0, 100, 80), 14, 6, 2);
+  EXPECT_EQ(gfx::Rect(388, 33, 10, 14), layout.badge);
+  EXPECT_EQ(gfx::Rect(14, 32, 372, 16), layout.label);
+}
+
+TEST(TreeRowLayout, FixedWidthScrolledToTheEnd)
+{
+  const TreeRowLayout layout =
+    tree_row_layout(gfx::Rect(0, 32, 1000, 16), gfx::Rect(900, 0, 100, 80), 14, 6, 2);
+  EXPECT_EQ(gfx::Rect(988, 33, 10, 14), layout.badge);
+  EXPECT_EQ(gfx::Rect(14, 32, 972, 16), layout.label);
+}
+
+// A tree without a width shows its whole rows, or more, and paints the
+// badge at the end of the row, as before
+
+TEST(TreeRowLayout, NoWidth)
+{
+  EXPECT_EQ(gfx::Rect(188, 33, 10, 14),
+            tree_row_layout(gfx::Rect(0, 32, 200, 16), gfx::Rect(0, 0, 200, 80), 14, 6, 2).badge);
+  EXPECT_EQ(gfx::Rect(188, 33, 10, 14),
+            tree_row_layout(gfx::Rect(0, 32, 200, 16), gfx::Rect(0, 0, 350, 80), 14, 6, 2).badge);
+}
+
+TEST(TreeRowLayout, NoBadge)
+{
+  const TreeRowLayout layout =
+    tree_row_layout(gfx::Rect(0, 32, 1000, 16), gfx::Rect(300, 0, 100, 80), 14, 0, 2);
+  EXPECT_TRUE(layout.badge.isEmpty());
+  EXPECT_EQ(gfx::Rect(14, 32, 384, 16), layout.label);
+}
+
+// A label that starts past the badge isn't painted
+TEST(TreeRowLayout, LabelPastTheBadge)
+{
+  const TreeRowLayout layout =
+    tree_row_layout(gfx::Rect(0, 32, 1000, 16), gfx::Rect(0, 0, 20, 80), 14, 6, 2);
+  EXPECT_EQ(0, layout.label.w);
+}

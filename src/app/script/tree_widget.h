@@ -8,6 +8,7 @@
 #define APP_SCRIPT_TREE_WIDGET_H_INCLUDED
 #pragma once
 
+#include "gfx/rect.h"
 #include "obs/signal.h"
 #include "ui/view.h"
 
@@ -34,6 +35,23 @@ struct TreeNode {
 
 using TreeNodes = std::vector<std::unique_ptr<TreeNode>>;
 using TreeRows = std::vector<std::pair<TreeNode*, int>>; // Visible nodes and their depth
+
+// Where a row paints its badge and its label. The badge sits at the
+// right of the part of the row that the view shows, the label ends
+// before it.
+struct TreeRowLayout {
+  gfx::Rect badge; // Empty without a badge
+  gfx::Rect label;
+};
+
+// row and visible are in the coordinates of the tree's content,
+// labelX is where the label starts, badgeTextWidth is 0 without a
+// badge, pad is the space around the badge and its text.
+TreeRowLayout tree_row_layout(const gfx::Rect& row,
+                              const gfx::Rect& visible,
+                              int labelX,
+                              int badgeTextWidth,
+                              int pad);
 
 // The nodes of a tree, its visible rows and its selection, without
 // the widget that paints them.
@@ -100,6 +118,7 @@ public:
 
 protected:
   void onSizeHint(ui::SizeHintEvent& ev) override;
+  void onSetViewScroll(const gfx::Point& pt) override;
 
 private:
   class Content;
