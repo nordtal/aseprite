@@ -1,18 +1,19 @@
 -- Copyright (C) 2026  Nordtal
 --
--- On start, Nordtal Designer signs the designer in to GitHub, clones
--- the newest season repository the account can write to and loads
--- the plugin in its designer/ folder. The plugin knows the resource
--- pack; this script doesn't.
+-- On start, Nordtal Designer signs the designer in to GitHub, offers
+-- a newer release of itself, clones the newest season repository the
+-- account can write to and loads the plugin in its designer/ folder.
+-- The plugin knows the resource pack; this script doesn't.
 --
 -- The app trusts this file like season.lua, and it follows the same
 -- rules: every global it uses is kept when it loads, no string
 -- methods, no tail calls.
 
 local app, Dialog, Process = app, Dialog, Process
-local find, format = string.find, string.format
+local find, format, match = string.find, string.format, string.match
 local concat, insert = table.concat, table.insert
 local max = math.max
+local pcall = pcall
 local getenv = os.getenv
 local fs = app.fs
 local joinPath, isFile, isDirectory, listFiles, makeAllDirectories, chooseFolder =
@@ -48,6 +49,12 @@ local strings = {
     java = "Downloading Java for Gradle...",
     javaFailed = "Java for Gradle could not be set up:",
     changeFolder = "Nordtal Folder...",
+    updateText = "Nordtal Designer %s is available. This is %s.",
+    install = "Install",
+    later = "Later",
+    installing = "Installing Nordtal Designer %s...",
+    installedOnQuit = "Nordtal Designer %s replaces this version when you quit the app.",
+    installFailed = "Installing failed:",
   },
   de = {
     title = "Nordtal Designer",
@@ -75,6 +82,12 @@ local strings = {
     java = "Java für Gradle wird heruntergeladen...",
     javaFailed = "Java für Gradle konnte nicht eingerichtet werden:",
     changeFolder = "Nordtal-Ordner...",
+    updateText = "Nordtal Designer %s ist verfügbar. Dies ist %s.",
+    install = "Installieren",
+    later = "Später",
+    installing = "Nordtal Designer %s wird installiert...",
+    installedOnQuit = "Nordtal Designer %s ersetzt diese Version, wenn du die App beendest.",
+    installFailed = "Die Installation ist fehlgeschlagen:",
   },
 }
 
@@ -119,9 +132,52 @@ end
 
 local start, signIn, findSeason, offerClone
 
+-- The version in a release tag
+local function version(tag)
+  return (match(tag, "^v(.*)$") or tag)
+end
+
+-- Offers the latest release if it's newer, then done() goes on with
+-- the season. A failed check goes on without a word.
+local function offerUpdate(done)
+  season.latestUpdate(function(update)
+    if not update then
+      done()
+      return
+    end
+    -- Closing a dialog goes on, but not while the next one replaces it
+    local busy = false
+    local function goOn()
+      if not busy then done() end
+    end
+    local function install()
+      busy = true
+      show(function(d) d:label{ text=tr("installing", version(update.tag)) } end)
+      season.install(update, season.target, function(ok, err)
+        busy = false
+        show(function(d)
+          if ok then
+            d:label{ text=tr("installedOnQuit", version(update.tag)) }
+          else
+            d:label{ text=tr("installFailed") }
+            addLines(d, err or {})
+            d:button{ text=tr("tryAgain"), onclick=install }
+          end
+          d:button{ text=tr("close") }
+        end, goOn)
+      end)
+    end
+    show(function(d)
+      d:label{ text=tr("updateText", version(update.tag), version(season.release)) }
+      d:button{ text=tr("install"), focus=true, onclick=install }
+      d:button{ text=tr("later") }
+    end, goOn)
+  end)
+end
+
 local loadPlugin
 
--- The JDK that gradlew in the clone runs with, then the plugin
+-- The JDK the season's Gradle runs on, then the plugin
 local function setUp(dir, repo)
   local steps = season.java(dir, function(home, err)
     if home then
@@ -263,7 +319,7 @@ signIn = function()
         end,
         function(ok, err)
           if ok then
-            findSeason()
+            offerUpdate(findSeason)
           elseif cancelled then
             signIn()
           else
@@ -283,7 +339,7 @@ end
 start = function()
   season.signedIn(function(ok)
     if ok then
-      findSeason()
+      offerUpdate(findSeason)
     else
       signIn()
     end
@@ -313,8 +369,14 @@ function init(p)
   start()
 end
 
+-- The app calls exit() as it quits, and also when the extension is
+-- disabled; scripts learn of no other quit. The update goes first, so
+-- an error of the season's plugin can't lose it.
 function exit(p)
+  if season then
+    season.finishInstall()
+  end
   if exitPlugin then
-    exitPlugin()
+    pcall(exitPlugin)
   end
 end

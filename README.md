@@ -14,6 +14,11 @@ and attaches them to its release.
 `Nordtal Designer.exe`. SmartScreen warns about an unknown publisher: click *More info*, then
 *Run anyway*.
 
+After the first install, the designer checks the releases at each start once it is signed in to
+GitHub, announces a newer one and installs it with one click. The new version replaces the app when
+the app quits and runs from the next start. On Windows that happens only for a folder that holds
+nothing but `Nordtal Designer.exe` and `data`, as the package unpacks it.
+
 # Aseprite
 
 [![build](https://github.com/aseprite/aseprite/actions/workflows/build.yml/badge.svg)](https://github.com/aseprite/aseprite/actions/workflows/build.yml)

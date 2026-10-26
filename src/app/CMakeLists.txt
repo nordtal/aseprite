@@ -693,6 +693,7 @@ target_sources(app-lib PRIVATE
   ui/search_entry.cpp
   ui/select_shortcut.cpp
   ui/selection_mode_field.cpp
+  ui/side_panel.cpp
   ui/skin/skin_part.cpp
   ui/skin/skin_property.cpp
   ui/skin/skin_slider_property.cpp
