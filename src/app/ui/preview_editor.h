@@ -50,7 +50,7 @@ protected:
   void onInitTheme(ui::InitThemeEvent& ev) override;
   void onClose(ui::CloseEvent& ev) override;
   void onWindowResize() override;
-  void onWindowMovement() override;
+  void onOpen(ui::Event& ev) override;
 
 private:
   void uncheckCenterButton();
@@ -75,10 +75,10 @@ private:
   // an infinite recursive loop when PreviewEditorWindow::updateUsingEditor calls the
   // openWindow() method.
   bool m_opening;
-  // True once the user moved or resized the window, which then saves its
-  // place: a window that only opened in its default place saves none, so
-  // the next default follows the editor.
-  bool m_moved = false;
+  // Where the window opened, its bounds and its native frame in the
+  // native multi-window mode
+  gfx::Rect m_openBounds;
+  gfx::Rect m_openFrame;
 };
 
 // Where the Preview window opens when the user saved no place: size at
@@ -86,6 +86,15 @@ private:
 // so it covers none of the panels around the editor. A view too small
 // for it keeps its top left corner.
 gfx::Rect default_preview_bounds(const gfx::Rect& editorView, const gfx::Size& size, int gap);
+
+// True when the Preview window closes at another place than it opened
+// at: its bounds, or in the native multi-window mode its native frame,
+// moved or changed size. Only then does it save its place, so a default
+// place doesn't stick.
+bool preview_place_changed(const gfx::Rect& openBounds,
+                           const gfx::Rect& openFrame,
+                           const gfx::Rect& closeBounds,
+                           const gfx::Rect& closeFrame);
 
 } // namespace app
 

@@ -28,9 +28,11 @@
 #include "app/ui_context.h"
 #include "doc/sprite.h"
 #include "gfx/rect.h"
+#include "os/window.h"
 #include "ui/base.h"
 #include "ui/button.h"
 #include "ui/close_event.h"
+#include "ui/display.h"
 #include "ui/fit_bounds.h"
 #include "ui/message.h"
 #include "ui/system.h"
@@ -227,6 +229,14 @@ gfx::Rect default_preview_bounds(const gfx::Rect& editorView, const gfx::Size& s
                    size.h);
 }
 
+bool preview_place_changed(const gfx::Rect& openBounds,
+                           const gfx::Rect& openFrame,
+                           const gfx::Rect& closeBounds,
+                           const gfx::Rect& closeFrame)
+{
+  return closeBounds != openBounds || closeFrame != openFrame;
+}
+
 bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
@@ -254,7 +264,11 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
     }
 
     case kCloseMessage:
-      if (m_moved)
+      // A window that closes with the main window skips
+      // Window::closeWindow(), which keeps the native frame
+      if (ownDisplay())
+        loadNativeFrame(display()->nativeWindow()->frame());
+      if (preview_place_changed(m_openBounds, m_openFrame, bounds(), lastNativeFrame()))
         save_window_pos(this, "MiniEditor");
       break;
   }
@@ -294,10 +308,13 @@ void PreviewEditorWindow::onWindowResize()
     updateUsingEditor(view->editor());
 }
 
-void PreviewEditorWindow::onWindowMovement()
+void PreviewEditorWindow::onOpen(ui::Event& ev)
 {
-  Window::onWindowMovement();
-  m_moved = true;
+  Window::onOpen(ev);
+
+  // The place it opened at, once a native window has its own display
+  m_openBounds = bounds();
+  m_openFrame = (ownDisplay() ? display()->nativeWindow()->frame() : gfx::Rect());
 }
 
 bool PreviewEditorWindow::hasDocument() const
