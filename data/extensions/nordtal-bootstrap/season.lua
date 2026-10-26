@@ -391,10 +391,11 @@ function season.isClone(target)
 end
 
 -- Loads designer/init.lua from the clone like a script of an
--- extension, trusted like this file: it defines init(plugin) and
--- exit(plugin). Its plugin object is the bootstrap's with the
--- designer folder as path and with the bootstrap's context. Returns
--- the exit function, or nil and the reason.
+-- extension, trusted like this file and in an environment of its own:
+-- it defines init(plugin) and exit(plugin) there. Its plugin object
+-- is the bootstrap's with the designer folder as path and with the
+-- bootstrap's context. Returns the exit function, or nil and the
+-- reason.
 function season.loadPlugin(clone, plugin, context)
   local designer = joinPath(clone, "designer")
   local fn = joinPath(designer, "init.lua")
@@ -413,18 +414,16 @@ function season.loadPlugin(clone, plugin, context)
       end
       return value
     end })
-  local ok, chunk = pcall(plugin.loadTrusted, plugin, fn)
+  local ok, chunk, env = pcall(plugin.loadTrusted, plugin, fn)
   if not ok then
     return nil, chunk
   end
-  init, exit = nil, nil
   local msg
   ok, msg = pcall(chunk)
-  local pluginInit, pluginExit = init, exit
-  init, exit = nil, nil
   if not ok then
     return nil, msg
   end
+  local pluginInit, pluginExit = env.init, env.exit
   if type(pluginInit) == "function" then
     ok, msg = pcall(pluginInit, proxy)
     if not ok then

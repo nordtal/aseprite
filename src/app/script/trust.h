@@ -17,7 +17,21 @@ namespace app { namespace script {
 // script loads, even from the same file or under the same name, is
 // another chunk and isn't trusted.
 
-// Trusts the chunk at index idx and every function defined in it.
+// Prepares the Lua state for trusted chunks. It's called once, after
+// every global is registered and before any script runs:
+// - The metatables of strings and of files can't be changed by a
+//   script. The methods of a string come from a copy of the string
+//   library, and only a method it lacks from the string table.
+// - debug.getinfo() hands out no function of the stack, so a script
+//   can't take a trusted function to have the app call it later.
+// - The globals are copied as they are now: a trusted chunk runs with
+//   these values, not with what a script made of the globals since.
+void prepare_trust(lua_State* L);
+
+// Trusts the chunk at index idx and every function defined in it,
+// gives it an environment of its own made from the globals that
+// prepare_trust() copied, and pushes that environment. It holds no
+// require(): a trusted chunk loads its files with plugin:loadTrusted().
 // The chunk stays alive with the Lua state.
 void trust_chunk(lua_State* L, int idx);
 

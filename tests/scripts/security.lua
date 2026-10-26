@@ -25,3 +25,21 @@ getmetatable = function() return { width=function() return 99 end, __getters={} 
 assert(r.width == 3)
 assert(app.fs.joinPath("a", "b") ~= nil)
 getmetatable = origGetmetatable
+
+-- Nor are the metatables of strings and files: a string's methods are
+-- the string library's, and one a script adds still works
+assert(getmetatable("") == false)
+assert(getmetatable(io.stdout) == false)
+local origUpper = string.upper
+string.upper = function() return "x" end
+assert(("a"):upper() == "A")
+string.upper = origUpper
+function string.twice(s) return s .. s end
+assert(("a"):twice() == "aa")
+string.twice = nil
+
+-- debug.getinfo() hands out no function of the stack
+local function f() return debug.getinfo(2, "fS") end
+local info = f()
+assert(info.func == nil and info.source:find("security.lua", 1, true))
+assert(debug.getinfo(print, "f").func == print)

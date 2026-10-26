@@ -930,10 +930,20 @@ void Extension::initScripts()
     engine->evalCode("init=nil exit=nil");
 
     // Eval the code of the script (it should define an init() and an
-    // exit() function). The scripts that come with the app are trusted.
-    engine->evalFile(script.fn, {}, isBuiltinExtension());
+    // exit() function). The scripts that come with the app are
+    // trusted and define them in an environment of their own.
+    int env = LUA_NOREF;
+    engine->evalFile(script.fn, {}, isBuiltinExtension() ? &env : nullptr);
+    auto getFunction = [L, env](const char* name) {
+      if (env == LUA_NOREF || env == LUA_REFNIL)
+        return lua_getglobal(L, name);
+      lua_rawgeti(L, LUA_REGISTRYINDEX, env);
+      const int type = lua_getfield(L, -1, name);
+      lua_remove(L, -2);
+      return type;
+    };
 
-    if (lua_getglobal(L, "exit") == LUA_TFUNCTION) {
+    if (getFunction("exit") == LUA_TFUNCTION) {
       // Save a reference to the exit() function of this script
       script.exitFunctionRef = luaL_ref(L, LUA_REGISTRYINDEX);
     }
@@ -942,7 +952,7 @@ void Extension::initScripts()
     }
 
     // Call the init() function of this script with a Plugin object as first parameter
-    if (lua_getglobal(L, "init") == LUA_TFUNCTION) {
+    if (getFunction("init") == LUA_TFUNCTION) {
       // Call init(plugin)
       lua_rawgeti(L, LUA_REGISTRYINDEX, m_plugin.pluginRef);
       lua_pcall(L, 1, 1, 0);
@@ -951,6 +961,7 @@ void Extension::initScripts()
     else {
       lua_pop(L, 1);
     }
+    luaL_unref(L, LUA_REGISTRYINDEX, env);
   }
 
   // Other scripts don't get to call the functions of this extension

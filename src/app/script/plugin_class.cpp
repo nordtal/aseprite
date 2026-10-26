@@ -143,7 +143,8 @@ int Plugin_gc(lua_State* L)
 }
 
 // The chunk of a Lua file, trusted like the scripts that come with
-// the app. Only a trusted call loads one.
+// the app, and the environment of its own it runs in (see trust.h).
+// Only a trusted call loads one.
 int Plugin_loadTrusted(lua_State* L)
 {
   get_obj<Plugin>(L, 1);
@@ -153,7 +154,7 @@ int Plugin_loadTrusted(lua_State* L)
   if (luaL_loadfilex(L, filename, "t") != LUA_OK)
     return lua_error(L);
   trust_chunk(L, -1);
-  return 1;
+  return 2;
 }
 
 int Plugin_newCommand(lua_State* L)

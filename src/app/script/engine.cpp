@@ -530,6 +530,9 @@ Engine::Engine() : L(luaL_newstate()), m_delegate(nullptr), m_printLastResult(fa
   register_websocket_class(L);
 #endif
 
+  // Last, before any script runs
+  prepare_trust(L);
+
   // Check that we have a clean start (without dirty in the stack)
   ASSERT(lua_gettop(L) == top);
 }
@@ -569,13 +572,15 @@ void Engine::printLastResult()
   m_printLastResult = true;
 }
 
-bool Engine::evalCode(const std::string& code, const std::string& filename, const bool trusted)
+bool Engine::evalCode(const std::string& code, const std::string& filename, int* trustedEnv)
 {
   bool ok = true;
   try {
     const int status = luaL_loadbuffer(L, code.c_str(), code.size(), filename.c_str());
-    if (status == LUA_OK && trusted)
+    if (status == LUA_OK && trustedEnv) {
       trust_chunk(L, -1);
+      *trustedEnv = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
     if (status != LUA_OK || lua_pcall(L, 0, 1, 0)) {
       const char* s = lua_tostring(L, -1);
       if (s)
@@ -624,7 +629,7 @@ void Engine::handleException(const std::exception& ex)
   onConsoleError(msg.c_str());
 }
 
-bool Engine::evalFile(const std::string& filename, const Params& params, const bool trusted)
+bool Engine::evalFile(const std::string& filename, const Params& params, int* trustedEnv)
 {
   std::stringstream buf;
   {
@@ -642,7 +647,7 @@ bool Engine::evalFile(const std::string& filename, const Params& params, const b
   if (g_debuggerDelegate)
     g_debuggerDelegate->startFile(absFilename, buf.str());
 
-  bool result = evalCode(buf.str(), "@" + absFilename, trusted);
+  bool result = evalCode(buf.str(), "@" + absFilename, trustedEnv);
 
   if (g_debuggerDelegate)
     g_debuggerDelegate->endFile(absFilename);

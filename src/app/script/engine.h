@@ -98,11 +98,15 @@ public:
   void notifyRunningGui();
 
   void printLastResult();
-  // A trusted chunk runs like the app itself, see trust.h
+  // With trustedEnv the chunk runs like the app itself, in an
+  // environment of its own (see trust.h); *trustedEnv is set to a
+  // registry reference to that environment, which the caller unrefs
   bool evalCode(const std::string& code,
                 const std::string& filename = std::string(),
-                bool trusted = false);
-  bool evalFile(const std::string& filename, const Params& params = Params(), bool trusted = false);
+                int* trustedEnv = nullptr);
+  bool evalFile(const std::string& filename,
+                const Params& params = Params(),
+                int* trustedEnv = nullptr);
   bool evalUserFile(const std::string& filename, const Params& params = Params());
 
   void handleException(const std::exception& ex);

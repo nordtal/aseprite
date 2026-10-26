@@ -172,7 +172,7 @@ end
 do
   local origin = app.fs.joinPath(tmp, "origin")
   assert(os.execute("git init -q '" .. origin .. "' && cd '" .. origin .. "'" ..
-                    " && mkdir designer && echo 'loaded = (loaded or 0) + 1' > designer/init.lua" ..
+                    " && mkdir designer && echo 'probe.loaded = (probe.loaded or 0) + 1' > designer/init.lua" ..
                     " && git add . && git -c user.name=t -c user.email=t@t commit -qm init"))
   local dir = app.fs.joinPath(tmp, "Nordtal", "season-2")
   assert(not season.isClone(dir))
@@ -210,30 +210,34 @@ do
   assert(last == configDir .. "|unset|unset|auth git-credential get", last)
 
   -- The clone's plugin gets its folder, its own preferences and the
-  -- context. The plugin object of the app loads it trusted; here the
-  -- stand-in loads it as any file.
+  -- context. The plugin object of the app loads it trusted, in an
+  -- environment of its own; here the stand-in loads it as any file, in
+  -- an environment that also holds the probe table of this test.
+  local probe = {}
   local plugin = { preferences={ cloneRoot="x" },
-                   loadTrusted=function(_, fn) return assert(loadfile(fn)) end }
-  loaded = nil
+                   loadTrusted=function(_, fn)
+                     local env = setmetatable({ probe=probe }, { __index=_G })
+                     return assert(loadfile(fn, "t", env)), env
+                   end }
   local exitPlugin, msg = season.loadPlugin(dir, plugin, { clone=dir })
   assert(exitPlugin, msg)
-  assert(loaded == 1)
-  assert(init == nil and exit == nil)
+  assert(probe.loaded == 1)
 
   write(app.fs.joinPath(dir, "designer", "init.lua"), [[
 function init(plugin)
-  seen = { path=plugin.path, clone=plugin.bootstrap.clone }
+  probe.path, probe.clone = plugin.path, plugin.bootstrap.clone
   plugin.preferences.n = 1
 end
-function exit(plugin) seen.exit = true end
+function exit(plugin) probe.exit = true end
 ]])
   exitPlugin = season.loadPlugin(dir, plugin, { clone=dir })
-  assert(seen.path == app.fs.joinPath(dir, "designer"))
-  assert(seen.clone == dir)
+  assert(probe.path == app.fs.joinPath(dir, "designer"))
+  assert(probe.clone == dir)
   assert(plugin.preferences.plugin.n == 1)
   assert(plugin.preferences.cloneRoot == "x")
+  assert(init == nil and exit == nil)
   exitPlugin()
-  assert(seen.exit)
+  assert(probe.exit)
 
   -- A clone without the plugin, or with a broken one, says why
   write(app.fs.joinPath(dir, "designer", "init.lua"), "error('broken')")
