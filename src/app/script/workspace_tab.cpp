@@ -59,6 +59,12 @@ void WorkspaceTab::setDocument(Doc* doc)
     updateDocView();
 }
 
+SidePanel* WorkspaceTab::makeSidePanel()
+{
+  m_sidePanel = std::make_unique<SidePanel>();
+  return m_sidePanel.get();
+}
+
 void WorkspaceTab::openTab()
 {
   Workspace* workspace = App::instance()->workspace();

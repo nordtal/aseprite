@@ -39,6 +39,7 @@ class LayoutSelector;
 class MainMenuBar;
 class Notifications;
 class PreviewEditorWindow;
+class SidePanel;
 class StatusBar;
 class Timeline;
 class ToolBar;
@@ -98,6 +99,12 @@ public:
   Dock* customizableDock() { return m_customizableDock; }
   void setCustomizeDock(bool enable);
 
+  // Docks the side panel of the active view at the far edge, outside
+  // the colour bar, and undocks the one it docked before. It's called
+  // whenever the view, the layout or the panel changes.
+  void updateSidePanel();
+  void removeSidePanel(SidePanel* panel);
+
   // When crash::DataRecovery finish to search for sessions, this
   // function is called.
   void dataRecoverySessionsAreReady();
@@ -135,6 +142,7 @@ private:
   DocView* getDocView();
   HomeView* getHomeView();
   void configureWorkspaceLayout();
+  void undockSidePanel();
   void saveTimelineConfiguration();
   void saveColorBarConfiguration();
   void saveActiveLayout();
@@ -164,6 +172,11 @@ private:
   obs::scoped_connection m_timelineResizeConn;
   obs::scoped_connection m_colorBarResizeConn;
   obs::scoped_connection m_saveDockLayoutConn;
+  obs::scoped_connection m_customizedDockConn;
+  obs::scoped_connection m_sidePanelResizeConn;
+  // The dock of the side panel and the customizable layout
+  Dock* m_panelDock = nullptr;
+  SidePanel* m_sidePanel = nullptr;
   bool m_firstResize = true;
 };
 

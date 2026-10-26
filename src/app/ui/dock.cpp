@@ -246,6 +246,10 @@ void Dock::undock(Widget* widget)
   if (!parent)
     return; // Already undocked
 
+  // A splitter of the widget can be under the mouse or dragged
+  for (auto* dock = dynamic_cast<Dock*>(parent); dock; dock = dynamic_cast<Dock*>(dock->parent()))
+    dock->forgetHit(widget);
+
   if (auto* parentDock = dynamic_cast<Dock*>(parent)) {
     parentDock->removeChild(widget);
 
@@ -263,6 +267,16 @@ void Dock::undock(Widget* widget)
   }
   else {
     parent->removeChild(widget);
+  }
+}
+
+void Dock::forgetHit(Widget* widget)
+{
+  if (m_hit.widget && (m_hit.widget == widget || m_hit.widget->hasAncestor(widget))) {
+    if (hasCapture())
+      releaseMouse();
+    m_hit = Hit();
+    m_dragging = false;
   }
 }
 

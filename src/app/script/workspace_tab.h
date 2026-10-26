@@ -8,6 +8,7 @@
 #define APP_SCRIPT_WORKSPACE_TAB_H_INCLUDED
 #pragma once
 
+#include "app/ui/side_panel.h"
 #include "app/ui/tabs.h"
 #include "app/ui/workspace_view.h"
 #include "doc/object_id.h"
@@ -45,6 +46,9 @@ public:
   Doc* document() const;
   void setDocument(Doc* doc);
 
+  // Creates the side panel, which the tab owns.
+  SidePanel* makeSidePanel();
+
   // Adds the tab to the workspace (or selects it), and removes it.
   void openTab();
   void closeTab();
@@ -63,6 +67,7 @@ public:
   InputChainElement* onGetInputChainElement() override;
   DocView* docView() override;
   void removeEmbeddedView(DocView* view) override;
+  SidePanel* sidePanel() override { return m_sidePanel.get(); }
 
   // The embedded document went away without the script: it was closed
   // in the tab, or another tab embedded it. Fired after the change.
@@ -78,6 +83,7 @@ private:
   std::function<void()> m_onClose;
   doc::ObjectId m_docId = doc::NullId;
   bool m_closable = true;
+  std::unique_ptr<SidePanel> m_sidePanel;
   obs::scoped_connection m_exitConn;
   // Tells a deferred event whether the tab still exists
   std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);

@@ -16,6 +16,7 @@ class Widget;
 namespace app {
 class DocView;
 class InputChainElement;
+class SidePanel;
 class Workspace;
 
 class WorkspaceView {
@@ -56,6 +57,10 @@ public:
   // DocView::setHost()), because its document closes or another view
   // embeds it.
   virtual void removeEmbeddedView(DocView* view) {}
+
+  // The panel that the main window docks while this view is active,
+  // if any.
+  virtual SidePanel* sidePanel() { return nullptr; }
 };
 
 } // namespace app
