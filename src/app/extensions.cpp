@@ -1264,6 +1264,78 @@ bool is_safe_archive_entry(const std::string& filename)
   return true;
 }
 
+base::paths extract_extension_archive(const std::string& zipFn, const ExtensionInfo& info)
+{
+  base::paths installedFiles;
+
+  // Uncompress zipFn in info.dstPath. Each entry is checked as it is
+  // read, so a file swapped after a first read can't bring in one
+  // that was never checked: every file lands inside info.dstPath, no
+  // "..", no absolute path and no link that could point elsewhere.
+  {
+    ReadArchive in(zipFn);
+    WriteArchive out;
+
+    archive_entry* entry;
+    while ((entry = in.readEntry()) != nullptr) {
+      const char* entryFnPtr = archive_entry_pathname(entry);
+      if (!entryFnPtr)
+        continue;
+
+      const auto type = archive_entry_filetype(entry);
+      if (!is_safe_archive_entry(entryFnPtr) || archive_entry_hardlink(entry) ||
+          (type != AE_IFREG && type != AE_IFDIR)) {
+        for (auto it = installedFiles.rbegin(); it != installedFiles.rend(); ++it) {
+          const std::string fullFn = base::join_path(info.dstPath, *it);
+          if (base::is_directory(fullFn))
+            base::remove_directory(fullFn);
+          else if (base::is_file(fullFn))
+            base::delete_file(fullFn);
+        }
+        throw base::Exception("The extension has a file outside its folder: '%s'", entryFnPtr);
+      }
+
+      // Fix the entry filename to write the file in the disk
+      std::string fn = entryFnPtr;
+
+      LOG("EXT: Original filename in zip <%s>...\n", fn.c_str());
+
+      // Do not install __info.json file if it's inside the .zip as
+      // some users are distributing extensions with the __info.json
+      // file inside.
+      if (base::string_to_lower(base::get_file_name(fn)) == kInfoJson) {
+        LOG("EXT: Ignoring <%s>...\n", fn.c_str());
+        continue;
+      }
+
+      if (!info.commonPath.empty()) {
+        // Check mismatch with package.json common path
+        if (fn.compare(0, info.commonPath.size(), info.commonPath) != 0)
+          continue;
+
+        fn.erase(0, info.commonPath.size());
+        if (fn.empty())
+          continue;
+      }
+
+      installedFiles.push_back(fn);
+
+      const std::string fullFn = base::join_path(info.dstPath, fn);
+#if _WIN32
+      archive_entry_copy_pathname_w(entry, base::from_utf8(fullFn).c_str());
+#else
+      archive_entry_set_pathname(entry, fullFn.c_str());
+#endif
+
+      LOG("EXT: Uncompressing file <%s> to <%s>\n", fn.c_str(), fullFn.c_str());
+
+      out.writeEntry(in, entry);
+    }
+  }
+
+  return installedFiles;
+}
+
 ExtensionInfo Extensions::getCompressedExtensionInfo(const std::string& zipFn) const
 {
   ExtensionInfo info;
@@ -1327,72 +1399,7 @@ ExtensionInfo Extensions::getCompressedExtensionInfo(const std::string& zipFn) c
 Extension* Extensions::installCompressedExtension(const std::string& zipFn,
                                                   const ExtensionInfo& info)
 {
-  base::paths installedFiles;
-
-  // Every file lands inside info.dstPath: no "..", no absolute path
-  // and no link that could point elsewhere
-  {
-    ReadArchive in(zipFn);
-    archive_entry* entry;
-    while ((entry = in.readEntry()) != nullptr) {
-      const char* entryFnPtr = archive_entry_pathname(entry);
-      if (!entryFnPtr)
-        continue;
-      const auto type = archive_entry_filetype(entry);
-      if (!is_safe_archive_entry(entryFnPtr) || archive_entry_hardlink(entry) ||
-          (type != AE_IFREG && type != AE_IFDIR))
-        throw base::Exception("The extension has a file outside its folder: '%s'", entryFnPtr);
-    }
-  }
-
-  // Uncompress zipFn in info.dstPath
-  {
-    ReadArchive in(zipFn);
-    WriteArchive out;
-
-    archive_entry* entry;
-    while ((entry = in.readEntry()) != nullptr) {
-      const char* entryFnPtr = archive_entry_pathname(entry);
-      if (!entryFnPtr)
-        continue;
-
-      // Fix the entry filename to write the file in the disk
-      std::string fn = entryFnPtr;
-
-      LOG("EXT: Original filename in zip <%s>...\n", fn.c_str());
-
-      // Do not install __info.json file if it's inside the .zip as
-      // some users are distributing extensions with the __info.json
-      // file inside.
-      if (base::string_to_lower(base::get_file_name(fn)) == kInfoJson) {
-        LOG("EXT: Ignoring <%s>...\n", fn.c_str());
-        continue;
-      }
-
-      if (!info.commonPath.empty()) {
-        // Check mismatch with package.json common path
-        if (fn.compare(0, info.commonPath.size(), info.commonPath) != 0)
-          continue;
-
-        fn.erase(0, info.commonPath.size());
-        if (fn.empty())
-          continue;
-      }
-
-      installedFiles.push_back(fn);
-
-      const std::string fullFn = base::join_path(info.dstPath, fn);
-#if _WIN32
-      archive_entry_copy_pathname_w(entry, base::from_utf8(fullFn).c_str());
-#else
-      archive_entry_set_pathname(entry, fullFn.c_str());
-#endif
-
-      LOG("EXT: Uncompressing file <%s> to <%s>\n", fn.c_str(), fullFn.c_str());
-
-      out.writeEntry(in, entry);
-    }
-  }
+  const base::paths installedFiles = extract_extension_archive(zipFn, info);
 
   // Save the list of installed files in "__info.json" file
   {
