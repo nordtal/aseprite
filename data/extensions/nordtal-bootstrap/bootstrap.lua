@@ -52,7 +52,6 @@ local strings = {
     install = "Install",
     later = "Later",
     installing = "Installing Nordtal Designer %s...",
-    installed = "Nordtal Designer %s is installed and runs from the next start.",
     installedOnQuit = "Nordtal Designer %s replaces this version when you quit the app.",
     installFailed = "Installing failed:",
   },
@@ -86,7 +85,6 @@ local strings = {
     install = "Installieren",
     later = "Später",
     installing = "Nordtal Designer %s wird installiert...",
-    installed = "Nordtal Designer %s ist installiert und läuft ab dem nächsten Start.",
     installedOnQuit = "Nordtal Designer %s ersetzt diese Version, wenn du die App beendest.",
     installFailed = "Die Installation ist fehlgeschlagen:",
   },
@@ -158,7 +156,7 @@ local function offerUpdate(done)
         busy = false
         show(function(d)
           if ok then
-            d:label{ text=tr(windows and "installedOnQuit" or "installed", version(update.tag)) }
+            d:label{ text=tr("installedOnQuit", version(update.tag)) }
           else
             d:label{ text=tr("installFailed") }
             addLines(d, err or {})

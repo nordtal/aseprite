@@ -90,14 +90,15 @@ case "$1 $2" in
   "repo list") cat "$(dirname "$0")/repos.json" ;;
   "api repos/nordtal/aseprite/releases/latest") cat "$(dirname "$0")/latest.json" ;;
   "release download")
-    # Copies package.zip as the asset that --pattern names into --dir
-    prev= ; pattern= ; dir=
+    # Copies package.zip to --output; the asset gone.zip fails silently
+    prev= ; pattern= ; output=
     for a in "$@"; do
       [ "$prev" = --pattern ] && pattern=$a
-      [ "$prev" = --dir ] && dir=$a
+      [ "$prev" = --output ] && output=$a
       prev=$a
     done
-    cp "$(dirname "$0")/package.zip" "$dir/$pattern" ;;
+    [ "$pattern" = gone.zip ] && exit 1
+    cp "$(dirname "$0")/package.zip" "$output" ;;
   *) exit 1 ;;
 esac
 ]])
@@ -459,12 +460,16 @@ do
   end
   local json = '{"tag_name":"v1.3.18.6-designer.3","draft":false,"prerelease":false,' ..
                '"assets":[{"name":"P.zip","digest":"sha256:' .. sum .. '"}]}'
-  -- Without a tag of its own or a package for this computer it doesn't ask
-  season.release, season.package = nil, "P.zip"
+  -- Without a tag of its own, a package for this computer or an app it
+  -- may replace it doesn't ask
+  local target = season.target
+  season.release, season.package, season.target = nil, "P.zip", "App"
   assert(latest(json) == nil)
   season.release, season.package = current, nil
   assert(latest(json) == nil)
-  season.package = "P.zip"
+  season.package, season.target = "P.zip", nil
+  assert(latest(json) == nil)
+  season.target = "App"
   update = latest(json)
   assert(update and update.tag == "v1.3.18.6-designer.3" and update.sha256 == sum)
   local last
@@ -473,7 +478,23 @@ do
   local none, err = latest(nil)
   assert(none == nil and err)
   assert(latest("not json") == nil)
-  season.release, season.package = nil, nil
+  season.release, season.package, season.target = nil, nil, target
+end
+
+-- On Windows the update replaces the app's whole folder, so only a
+-- folder that holds the app and nothing else
+do
+  local dir = app.fs.joinPath(tmp, "own")
+  write(app.fs.joinPath(dir, "Nordtal Designer.exe"), "exe")
+  write(app.fs.joinPath(dir, "data", "x"), "x")
+  assert(season.ownFolder(dir))
+  write(app.fs.joinPath(dir, "photo.png"), "x")
+  assert(not season.ownFolder(dir))
+  os.remove(app.fs.joinPath(dir, "photo.png"))
+  app.fs.removeTree(app.fs.joinPath(dir, "data"))
+  write(app.fs.joinPath(dir, "data"), "x")
+  assert(not season.ownFolder(dir))
+  assert(not season.ownFolder(app.fs.joinPath(tmp, "no-such-folder")))
 end
 
 -- The new app takes the place of the old one, and a failed move leaves
@@ -501,22 +522,32 @@ end
 do
   local text = season.windowsHelper("C:\\Apps\\Nordtal Designer",
                                     "C:\\Apps\\.nordtal-designer-update\\Nordtal Designer",
-                                    "C:\\Apps\\.nordtal-designer-update\\old")
-  assert(text:find('set "target=C:\\Apps\\Nordtal Designer"\r\n', 1, true), text)
+                                    "C:\\Apps\\.nordtal-designer-update\\old",
+                                    "C:\\Apps\\.nordtal-designer-update")
+  assert(text:find('@echo off\r\nsetlocal DisableDelayedExpansion\r\n', 1, true), text)
+  assert(text:find('set "target=C:\\Apps\\Nordtal Designer"\r\n', 1, true))
   assert(text:find('set "staged=C:\\Apps\\.nordtal-designer-update\\Nordtal Designer"\r\n', 1, true))
   assert(text:find('set "old=C:\\Apps\\.nordtal-designer-update\\old"\r\n', 1, true))
-  assert(text:find(':wait\r\nmove "%target%" "%old%" >nul 2>&1\r\nif errorlevel 1 (\r\n', 1, true))
-  assert(text:find('goto wait', 1, true))
-  assert(text:find('move "%staged%" "%target%"', 1, true))
-  assert(text:find('if errorlevel 1 move "%old%" "%target%"', 1, true))
+  assert(text:find('set "work=C:\\Apps\\.nordtal-designer-update"\r\n', 1, true))
+  -- It gives up after a minute and leaves the old folder
+  assert(text:find(':wait\r\nmove "%target%" "%old%" >nul 2>&1\r\nif not errorlevel 1 goto swap\r\n' ..
+                   'set /a tries+=1\r\nif %tries% geq 60 goto done\r\n', 1, true))
+  assert(text:find(':swap\r\nmove "%staged%" "%target%" >nul 2>&1\r\n' ..
+                   'if errorlevel 1 move "%old%" "%target%" >nul 2>&1\r\n:done\r\n', 1, true))
+  -- It removes its own folder only while the app is in place
+  assert(text:find('if not exist "%target%\\Nordtal Designer.exe" exit /b 1\r\n' ..
+                   '(goto) 2>nul & rmdir /s /q "%work%"\r\n', 1, true))
   assert(not text:find("^\n") and not text:find("[^\r]\n"), "every line ends with CRLF")
-  local none, err = season.windowsHelper("C:\\100%\\Nordtal Designer", "C:\\a", "C:\\b")
+  local none, err = season.windowsHelper("C:\\100%\\Nordtal Designer", "C:\\a", "C:\\b", "C:\\c")
+  assert(none == nil and err:find("100%", 1, true))
+  none, err = season.windowsHelper("C:\\a", "C:\\b", "C:\\c", "C:\\100%")
   assert(none == nil and err:find("100%", 1, true))
 end
 
 -- On macOS the install downloads the package with gh, checks it
--- against the release's sha256, unpacks it next to the app, drops the
--- quarantine attribute and replaces the app with it
+-- against the release's sha256, unpacks it next to the app and drops
+-- the quarantine attribute. The new app replaces the old one when the
+-- app exits, so the running app never reads the new one's files.
 if app.os.macos then
   local apps = app.fs.joinPath(tmp, "Applications")
   local target = app.fs.joinPath(apps, "Nordtal Designer.app")
@@ -528,8 +559,18 @@ if app.os.macos then
   local src = app.fs.joinPath(tmp, "package", "Nordtal Designer.app")
   write(app.fs.joinPath(src, "Contents", "MacOS", "Nordtal Designer"), "new")
   local zip = app.fs.joinPath(ext, "tools", "gh", "bin", "package.zip")
-  assert(os.execute("xattr -w com.apple.quarantine '0081;0;test;' " .. quote(src) ..
+  assert(os.execute("xattr -w -r com.apple.quarantine '0081;0;test;' " .. quote(src) ..
                     " && ditto -c -k --keepParent " .. quote(src) .. " " .. quote(zip)))
+  local function quarantined(dir)
+    local x = io.popen("xattr -r " .. quote(dir))
+    local attrs = x:read("a")
+    x:close()
+    return attrs:find("com.apple.quarantine", 1, true) ~= nil
+  end
+  -- The attribute survives the zip, so the install has one to drop
+  local check = app.fs.joinPath(tmp, "check")
+  assert(os.execute("ditto -x -k " .. quote(zip) .. " " .. quote(check)))
+  assert(quarantined(check))
   local p = io.popen("shasum -a 256 " .. quote(zip))
   local sum = p:read("a"):match("^(%x+)")
   p:close()
@@ -548,19 +589,30 @@ if app.os.macos then
   assert(read(exe) == "old")
   assert(not app.fs.isDirectory(work))
 
+  -- A download that fails without a word says so
+  ok, err = install({ tag="v1.3.18.6-designer.3", asset="gone.zip", sha256=sum })
+  assert(not ok and table.concat(err, "\n") == "v1.3.18.6-designer.3 could not be downloaded",
+         table.concat(err, "\n"))
+  assert(not app.fs.isDirectory(work))
+
   update.sha256 = sum
   ok, err = install(update)
   assert(ok, err and table.concat(err, "\n"))
-  assert(read(exe) == "new")
-  local x = io.popen("xattr -r " .. quote(target))
-  local attrs = x:read("a")
-  x:close()
-  assert(not attrs:find("com.apple.quarantine", 1, true), attrs)
-  assert(not app.fs.isDirectory(work))
+  assert(read(exe) == "old")
   local last
   for line in io.lines(app.fs.joinPath(ext, "tools", "gh", "bin", "calls")) do last = line end
   assert(last:find("|release download v1.3.18.6-designer.3 --repo nordtal/aseprite " ..
-                   "--pattern Nordtal-Designer-macOS-arm64.zip --dir " .. work, 1, true), last)
+                   "--pattern Nordtal-Designer-macOS-arm64.zip --output " ..
+                   app.fs.joinPath(work, update.asset), 1, true), last)
+  season.finishInstall()
+  assert(read(exe) == "new")
+  assert(not quarantined(target))
+  assert(not app.fs.isDirectory(work))
+  -- Only once
+  write(exe, "kept")
+  season.finishInstall()
+  assert(read(exe) == "kept")
+  write(exe, "new")
 
   -- A package without the app inside leaves the app as it was
   write(app.fs.joinPath(tmp, "empty", "x"), "x")

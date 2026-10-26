@@ -296,6 +296,60 @@ local function parseSha256(out)
   end
 end
 
+-- Downloads an archive and puts the one folder it holds at o.target.
+-- o.download is the command that writes the archive to o.archive,
+-- whose sha256 must be o.checksum. o.unpack(archive, folder) is the
+-- command that unpacks it into the empty folder o.part, and
+-- o.valid(folder) tells whether the folder it holds is what o.holds
+-- names. o.what names the download in the reasons. done(problem) with
+-- nil, or the lines that tell why it failed.
+local function fetchFolder(s, o, done)
+  local function fail(err)
+    remove(o.archive)
+    done(err)
+  end
+  s.run(o.download, function(code, out, err)
+    if code ~= 0 then
+      fail(err[1] and err or { o.what .. " could not be downloaded" })
+      return
+    end
+    s.run(sha256(o.archive), function(code, out, err)
+      if parseSha256(out) ~= o.checksum then
+        fail({ "the download of " .. o.what .. " doesn't match its checksum" })
+        return
+      end
+      -- The archive is unpacked into an empty folder, which a failed
+      -- try leaves behind with whatever it unpacked. A target that
+      -- fails the check is what a failed try left, too. A link or a
+      -- file there stays, and tar would unpack through it, so it stops
+      -- the try.
+      for _, folder in ipairs({ o.part, o.target }) do
+        if not removeTree(folder) then
+          fail({ folder .. " could not be removed" })
+          return
+        end
+      end
+      makeAllDirectories(o.part)
+      s.run(o.unpack(o.archive, o.part), function(code, out, err)
+        remove(o.archive)
+        local files = listFiles(o.part)
+        local problem
+        if code ~= 0 then
+          problem = err[1] and err or { o.what .. " could not be unpacked" }
+        elseif #files ~= 1 or not o.valid(joinPath(o.part, files[1])) then
+          problem = { "the download of " .. o.what .. " holds no single " .. o.holds }
+        elseif not rename(joinPath(o.part, files[1]), o.target) then
+          problem = { o.what .. " could not be moved to " .. o.target }
+        end
+        if not removeTree(o.part) then
+          problem = problem or { o.part .. " could not be removed" }
+        end
+        done(problem)
+      end)
+    end)
+  end)
+end
+
 -- done(home, err) with the home of the Eclipse Temurin JDK that the
 -- clone's daemon JVM criteria ask for. The first time it comes from
 -- the Adoptium API, checked against the API's sha256, into a folder
@@ -321,69 +375,38 @@ function season.java(clone, done)
 
   local s = steps()
   local archive = target .. (windows and ".zip" or ".tar.gz")
-  local part = target .. ".part"
-  local function fail(err)
-    remove(archive)
-    done(nil, err)
-  end
   makeAllDirectories(javaRoot)
   local url = adoptium .. version .. "/hotspot?image_type=jdk&vendor=eclipse" ..
               "&os=" .. (windows and "windows" or macos and "mac" or "linux") ..
               "&architecture=" .. (arm64 and "aarch64" or "x64")
   s.run({ curl, "-fsSL", url }, function(code, out, err)
     if code ~= 0 then
-      fail(err)
+      done(nil, err)
       return
     end
     local ok, list = pcall(json.decode, concat(out, "\n"))
     local pkg = ok and list[1] and list[1].binary and list[1].binary.package
     local checksum = pkg and pkg.checksum and lower(tostring(pkg.checksum))
     if not checksum or not match(checksum, "^%x+$") or #checksum ~= 64 or not pkg.link then
-      fail({ "the Adoptium API has no JDK " .. version .. " for this computer" })
+      done(nil, { "the Adoptium API has no JDK " .. version .. " for this computer" })
       return
     end
-    s.run({ curl, "-fsSL", "-o", archive, tostring(pkg.link) }, function(code, out, err)
-      if code ~= 0 then
-        fail(err)
+    fetchFolder(s, {
+      download={ curl, "-fsSL", "-o", archive, tostring(pkg.link) },
+      archive=archive,
+      checksum=checksum,
+      unpack=function(a, folder) return { tar, "-xf", a, "-C", folder } end,
+      part=target .. ".part",
+      target=target,
+      valid=function(folder) return (hasJava(javaHome(folder))) end,
+      what="JDK " .. version,
+      holds="JDK folder",
+    }, function(problem)
+      if problem then
+        done(nil, problem)
         return
       end
-      s.run(sha256(archive), function(code, out, err)
-        if parseSha256(out) ~= checksum then
-          fail({ "the download of JDK " .. version .. " doesn't match its checksum" })
-          return
-        end
-        -- The archive is unpacked into an empty folder, which a failed
-        -- try leaves behind with whatever it unpacked. A target without
-        -- java is what a failed try left, too. A link or a file there
-        -- stays, and tar would unpack through it, so it stops the try.
-        for _, dir in ipairs({ part, target }) do
-          if not removeTree(dir) then
-            fail({ dir .. " could not be removed" })
-            return
-          end
-        end
-        makeAllDirectories(part)
-        s.run({ tar, "-xf", archive, "-C", part }, function(code, out, err)
-          remove(archive)
-          local files = listFiles(part)
-          local problem
-          if code ~= 0 then
-            problem = err[1] and err or { "JDK " .. version .. " could not be unpacked" }
-          elseif #files ~= 1 or not hasJava(javaHome(joinPath(part, files[1]))) then
-            problem = { "the download of JDK " .. version .. " holds no single JDK folder" }
-          elseif not rename(joinPath(part, files[1]), target) then
-            problem = { "JDK " .. version .. " could not be moved to " .. target }
-          end
-          if not removeTree(part) then
-            problem = problem or { part .. " could not be removed" }
-          end
-          if problem then
-            done(nil, problem)
-            return
-          end
-          finish()
-        end)
-      end)
+      finish()
     end)
   end)
   return s
@@ -406,19 +429,41 @@ do
   end
 end
 
--- The release asset that runs on this computer, the app it replaces
--- (the bundle on macOS, the folder on Windows) and the name of that
--- app inside the package
+-- The release asset that runs on this computer
 season.package = (macos and arm64 and "Nordtal-Designer-macOS-arm64.zip") or
                  (windows and "Nordtal-Designer-Windows-x64.zip") or nil
+
+-- The entries of the app's folder on Windows, as the package holds it
+local ownEntries = { ["Nordtal Designer.exe"]=true, data=true }
+
+-- true if the folder holds the app on Windows and nothing else. The
+-- update replaces the whole folder, so it's never one the designer
+-- keeps other files in, such as Downloads.
+function season.ownFolder(folder)
+  local files = listFiles(folder)
+  if #files ~= 2 then return false end
+  for _, name in ipairs(files) do
+    if not ownEntries[name] then return false end
+  end
+  return (isFile(joinPath(folder, "Nordtal Designer.exe")) and
+          isDirectory(joinPath(folder, "data")))
+end
+
+-- true if folder is the app: the bundle on macOS, the folder on Windows
+local function isApp(folder)
+  if windows then
+    return (season.ownFolder(folder))
+  end
+  return (isFile(joinPath(folder, "Contents", "MacOS", "Nordtal Designer")))
+end
+
+-- The app an update replaces, or nil if there is none it may replace
 if macos then
   season.target = match(fs.appPath, "^(.+%.app)/Contents/MacOS/[^/]+$")
-elseif windows then
+elseif windows and season.ownFolder(filePath(fs.appPath)) then
   season.target = filePath(fs.appPath)
 end
 local packaged = windows and "Nordtal Designer" or "Nordtal Designer.app"
-local packagedExe = windows and joinPath(packaged, "Nordtal Designer.exe")
-                             or joinPath(packaged, "Contents", "MacOS", "Nordtal Designer")
 
 -- The numbers of the Aseprite version and the designer's number of a
 -- tag, or nil
@@ -465,9 +510,10 @@ function season.updateFrom(latest, current, package)
 end
 
 -- done(update, err) with the update to the latest release, or nil.
--- A build without a tag or a package doesn't ask and returns nil.
+-- A build without a tag, a package or an app it may replace doesn't
+-- ask and returns nil.
 function season.latestUpdate(done)
-  if not season.release or not season.package then
+  if not season.release or not season.package or not season.target then
     done(nil)
     return
   end
@@ -506,7 +552,9 @@ function season.replace(staged, target, old)
     return nil, target .. " could not be moved"
   end
   if not rename(staged, target) then
-    rename(old, target)
+    if not rename(old, target) then
+      return nil, staged .. " could not be moved to " .. target .. ", and the old app is in " .. old
+    end
     return nil, staged .. " could not be moved to " .. target
   end
   removeTree(old)
@@ -514,118 +562,141 @@ function season.replace(staged, target, old)
 end
 
 -- The batch file that replaces the app folder target with staged on
--- Windows. It waits until the folder can be moved, which it can once
--- the app has quit, and moves the old folder back if the new one can't
--- take its place. Returns nil and the reason for a path that cmd would
--- expand.
-function season.windowsHelper(target, staged, old)
-  for _, path in ipairs({ target, staged, old }) do
+-- Windows, as season.replace() does on macOS. It tries once a second
+-- for a minute to move the folder, which works once the app has quit,
+-- and leaves the old folder if it can't. Then it removes work, the
+-- folder it's in, unless the app isn't at target, which a failed way
+-- back leaves in old. Returns nil and the reason for a path that cmd
+-- would expand.
+function season.windowsHelper(target, staged, old, work)
+  for _, path in ipairs({ target, staged, old, work }) do
     if find(path, "%", 1, true) then
       return nil, path .. " has a % in it, which the installer can't use"
     end
   end
   return (concat({
     "@echo off",
+    "setlocal DisableDelayedExpansion",
     "chcp 65001 >nul",
     "rem Nordtal Designer puts its new version in place once it has quit",
     'set "target=' .. target .. '"',
     'set "staged=' .. staged .. '"',
     'set "old=' .. old .. '"',
+    'set "work=' .. work .. '"',
+    "set tries=0",
     ":wait",
     'move "%target%" "%old%" >nul 2>&1',
-    "if errorlevel 1 (",
-    "  ping -n 2 127.0.0.1 >nul",
-    "  goto wait",
-    ")",
+    "if not errorlevel 1 goto swap",
+    "set /a tries+=1",
+    "if %tries% geq 60 goto done",
+    "ping -n 2 127.0.0.1 >nul",
+    "goto wait",
+    ":swap",
     'move "%staged%" "%target%" >nul 2>&1',
     'if errorlevel 1 move "%old%" "%target%" >nul 2>&1',
-    'rmdir /s /q "%old%" 2>nul',
+    ":done",
+    'if not exist "%target%\\Nordtal Designer.exe" exit /b 1',
+    -- (goto) ends the batch file before rmdir removes it
+    '(goto) 2>nul & rmdir /s /q "%work%"',
     "" }, "\r\n"))
 end
 
--- The batch file an install on Windows leaves for the app's exit
-local pendingHelper
+-- The update an install left ready for the app's exit
+local pending
 
 -- Installs the update in place of the app at target. The package
 -- comes through gh, is checked against the release's sha256 and is
 -- unpacked into a folder next to the app, so the new app moves into
--- place without a copy. On macOS it replaces the app at once and
--- loses the quarantine attribute, as the first install does; on
--- Windows season.finishInstall() starts the helper that replaces it
--- when the app exits. done(ok, err). Returns the steps, or nil if done
--- was called already.
+-- place without a copy. On macOS it loses the quarantine attribute, as
+-- the first install does. season.finishInstall() puts it in place as
+-- the app exits. done(ok, err). Returns the steps, or nil if done was
+-- called already.
 function season.install(update, target, done)
   local work = joinPath(filePath(target), ".nordtal-designer-update")
-  local zip = joinPath(work, update.asset)
   local staged = joinPath(work, packaged)
   local old = joinPath(work, "old")
-  local function fail(err)
-    removeTree(work)
-    done(false, err)
-  end
+  local archive = joinPath(work, update.asset)
+  pending = nil
   if not removeTree(work) then
     done(false, { work .. " could not be removed" })
     return
   end
   makeAllDirectories(work)
+  local function fail(err)
+    removeTree(work)
+    done(false, err)
+  end
+  local function ready(helper)
+    pending = { target=target, staged=staged, old=old, work=work, helper=helper }
+    done(true)
+  end
   local s = steps()
-  s.run({ gh, "release", "download", update.tag, "--repo", season.repo,
-          "--pattern", update.asset, "--dir", work }, function(code, out, err)
-    if code ~= 0 then
-      fail(err)
+  fetchFolder(s, {
+    download={ gh, "release", "download", update.tag, "--repo", season.repo,
+               "--pattern", update.asset, "--output", archive },
+    archive=archive,
+    checksum=update.sha256,
+    unpack=function(a, folder)
+      if windows then
+        return { tar, "-xf", a, "-C", folder }
+      end
+      return { "/usr/bin/ditto", "-x", "-k", a, folder }
+    end,
+    part=joinPath(work, "part"),
+    target=staged,
+    valid=isApp,
+    what=update.tag,
+    holds="app",
+  }, function(problem)
+    if problem then
+      fail(problem)
       return
     end
-    s.run(sha256(zip), function(code, out, err)
-      if parseSha256(out) ~= update.sha256 then
-        fail({ "the download of " .. update.tag .. " doesn't match its checksum" })
+    if windows then
+      local text, why = season.windowsHelper(target, staged, old, work)
+      local helper = joinPath(work, "install.cmd")
+      local f = text and open(helper, "wb")
+      if not f then
+        fail({ why or helper .. " could not be written" })
         return
       end
-      local unpack = windows and { tar, "-xf", zip, "-C", work }
-                              or { "/usr/bin/ditto", "-x", "-k", zip, work }
-      s.run(unpack, function(code, out, err)
-        remove(zip)
-        if code ~= 0 or not isFile(joinPath(work, packagedExe)) then
-          fail(code ~= 0 and err[1] and err or { update.asset .. " holds no " .. packagedExe })
-          return
-        end
-        if windows then
-          local text, problem = season.windowsHelper(target, staged, old)
-          local helper = joinPath(work, "install.cmd")
-          local f = text and open(helper, "wb")
-          if not f then
-            fail({ problem or helper .. " could not be written" })
-            return
-          end
-          f:write(text)
-          f:close()
-          pendingHelper = helper
-          done(true)
-          return
-        end
-        s.run({ "/usr/bin/xattr", "-dr", "com.apple.quarantine", staged }, function(code, out, err)
-          if code ~= 0 then
-            fail(err)
-            return
-          end
-          local ok, problem = season.replace(staged, target, old)
-          removeTree(work)
-          done(ok == true, problem and { problem })
-        end)
-      end)
+      f:write(text)
+      f:close()
+      ready(helper)
+      return
+    end
+    s.run({ "/usr/bin/xattr", "-dr", "com.apple.quarantine", staged }, function(code, out, err)
+      if code ~= 0 then
+        fail(err[1] and err or { "the quarantine attribute could not be removed" })
+        return
+      end
+      ready()
     end)
   end)
   return s
 end
 
--- Starts the helper an install on Windows left, as the app exits.
--- explorer.exe hands it to the shell, so it outlives the app, which
--- ends every process it started when it exits.
+-- Puts the installed update in place as the app exits, so the app
+-- never runs with the files of another version. On macOS the bundle
+-- is swapped here; the folder the update came in goes only while the
+-- app is at its place, since a failed way back leaves it in that
+-- folder. On Windows the app's folder can't move while it runs, so
+-- the helper waits for that, started through explorer.exe, which
+-- hands it to the shell: it outlives the app, which ends every
+-- process it started when it exits.
 function season.finishInstall()
-  local helper = pendingHelper
-  if not helper then return end
-  pendingHelper = nil
-  run({ joinPath(getenv("SystemRoot") or "C:\\Windows", "explorer.exe"), helper },
-      function() end):wait()
+  local p = pending
+  if not p then return end
+  pending = nil
+  if windows then
+    run({ joinPath(getenv("SystemRoot") or "C:\\Windows", "explorer.exe"), p.helper },
+        function() end):wait()
+    return
+  end
+  season.replace(p.staged, p.target, p.old)
+  if isApp(p.target) then
+    removeTree(p.work)
+  end
 end
 
 function season.isClone(target)

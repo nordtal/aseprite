@@ -15,8 +15,9 @@ and attaches them to its release.
 *Run anyway*.
 
 After the first install, the designer checks the releases at each start once it is signed in to
-GitHub, announces a newer one and installs it with one click. On macOS the new version replaces the
-app at once and runs from the next start; on Windows it replaces the folder when the app quits.
+GitHub, announces a newer one and installs it with one click. The new version replaces the app when
+the app quits and runs from the next start. On Windows that happens only for a folder that holds
+nothing but `Nordtal Designer.exe` and `data`, as the package unpacks it.
 
 # Aseprite
 
