@@ -10,10 +10,52 @@
 
 #include "app/ui/dockable.h"
 #include "ui/box.h"
+#include "ui/splitter.h"
 
 #include <string>
 
 namespace app {
+
+// The width and the splitter's place that a side panel keeps under
+// its key: in the user's config across restarts if it's kept,
+// otherwise for the session
+class SidePanelKept {
+public:
+  SidePanelKept(const std::string& key = std::string(), bool inConfig = false)
+    : m_key(key)
+    , m_inConfig(inConfig)
+  {
+  }
+
+  // The width in points, or 0 if there's none
+  int width() const;
+  void setWidth(int width);
+
+  // The splitter's place in percent of the panel's height, or -1 if
+  // there's none
+  double split() const;
+  // Keeps the place within 0..100
+  void setSplit(double position);
+
+private:
+  std::string m_key;
+  bool m_inConfig;
+};
+
+// The splitter of a side panel (see SidePanel::split()). Where the
+// user drags it goes to kept, a position that a script or the layout
+// gives it doesn't.
+class SidePanelSplitter : public ui::Splitter {
+public:
+  explicit SidePanelSplitter(SidePanelKept* kept);
+
+protected:
+  void onPaint(ui::PaintEvent& ev) override;
+  void onPositionChange() override;
+
+private:
+  SidePanelKept* m_kept;
+};
 
 // A column of widgets that a workspace view gives the main window
 // (see WorkspaceView::sidePanel()). The main window docks it at its
@@ -52,16 +94,9 @@ protected:
   void onPaint(ui::PaintEvent& ev) override;
 
 private:
-  class Splitter;
-
-  // The value under the width key in section, or 0 if there's none
-  double kept(const char* section) const;
-  void keep(const char* section, double value);
-
   int m_side = ui::LEFT;
   int m_width = 0;
-  std::string m_widthKey;
-  bool m_widthKept = false;
+  SidePanelKept m_kept;
 };
 
 } // namespace app

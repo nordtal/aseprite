@@ -33,9 +33,11 @@ protected:
 
   virtual void onPositionChange();
 
-private:
+  // The first and the second child if they're visible
   Widget* panel1() const;
   Widget* panel2() const;
+
+private:
   void calcPos();
 
   Type m_type;

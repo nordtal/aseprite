@@ -1,7 +1,7 @@
 -- Dialog:splitter{} puts the side panel's widgets before it above a
 -- splitter and the ones after it below. It starts at half the height,
 -- or where the user dragged it before: cli/ui.sh keeps 25 % for the
--- panel side_panel_split_kept.
+-- panel side_panel_split_kept and 0 % for side_panel_split_top.
 
 ui_test(function()
   assert(app.forkApiVersion >= 7)
@@ -51,6 +51,15 @@ ui_test(function()
     function()
       assert(heights.above and heights.below, "a part got no room")
       assert(math.abs(share() - 0.25) < 0.02, "the part above has " .. share())
+      dlg:close()
+      heights = {}
+      dlg = panel("side_panel_split_top")
+      dlg:show()
+    end,
+    function()
+      -- A part without room isn't painted
+      assert(heights.below, "the part below got no room")
+      assert((heights.above or 0) <= 1, "the part above has " .. tostring(heights.above) .. " px")
       dlg:close()
     end,
   }
