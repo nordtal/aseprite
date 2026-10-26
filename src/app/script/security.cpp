@@ -616,7 +616,7 @@ bool ask_access(lua_State* L,
       for (ui::LinkLabel* link : { dlg.script(), dlg.file() }) {
         const std::vector<std::string> lines = break_lines(
           link->text(),
-          std::max(1, widest - excess),
+          alert_line_width(widest, excess),
           [link](const std::string& s) { return int(std::ceil(link->font()->textLength(s))); });
         link->setText(lines[0]);
         for (size_t i = 1; i < lines.size(); ++i) {
@@ -643,6 +643,11 @@ bool ask_access(lua_State* L,
       return false;
   }
   return true;
+}
+
+int alert_line_width(int widest, int excess)
+{
+  return std::max(160 * ui::guiscale(), widest - excess);
 }
 
 std::vector<std::string> break_lines(const std::string& text,

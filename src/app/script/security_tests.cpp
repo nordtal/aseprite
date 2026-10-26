@@ -20,6 +20,16 @@ int bytes(const std::string& s)
 
 } // anonymous namespace
 
+TEST(AlertLineWidth, TheWidestTextShrinksByTheExcess)
+{
+  EXPECT_EQ(300, alert_line_width(500, 200));
+}
+
+TEST(AlertLineWidth, ALineIsNeverNarrowerThan160Points)
+{
+  EXPECT_EQ(160, alert_line_width(500, 499));
+}
+
 TEST(BreakLines, ATextThatFitsStaysOneLine)
 {
   EXPECT_EQ(std::vector<std::string>{ "/a/b.lua" }, break_lines("/a/b.lua", 8, bytes));

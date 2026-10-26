@@ -50,6 +50,12 @@ bool ask_access(lua_State* L,
                 // function, or =3 if it's requested from a property.
                 const int stackLevel = 2);
 
+// The width the security alert breaks its script name and resource
+// at, when its widest one is excess points wider than the window has
+// room for. It never falls below 160 points at the UI scale, and the
+// window cuts what the alert holds beyond that.
+int alert_line_width(int widest, int excess);
+
 // The lines of text, each no wider than width as measure() gives it,
 // broken after the last "/" or space that fits, or else after the last
 // character that fits. A line holds at least one character.
