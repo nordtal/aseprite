@@ -41,9 +41,10 @@ jobs:
           -DSKIA_DIR=$PWD/skia \
           -DSKIA_LIBRARY_DIR=$PWD/skia/out/Release-x64
     - name: Build
-      run: ninja -C build aseprite tree_widget_tests settings_import_tests trust_tests security_tests preview_editor_tests extension_paths_tests resource_finder_tests
+      run: ninja -C build aseprite grid_ui_tests tree_widget_tests settings_import_tests trust_tests security_tests preview_editor_tests extension_paths_tests resource_finder_tests
     - name: Unit tests
       run: |
+        xvfb-run -a build/bin/grid_ui_tests
         build/bin/tree_widget_tests
         build/bin/settings_import_tests
         build/bin/trust_tests

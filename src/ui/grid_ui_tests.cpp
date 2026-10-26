@@ -50,6 +50,23 @@ TEST(Grid, Simple2x1Grid)
   delete grid;
 }
 
+// A widget that spans every column of a grid whose columns are all
+// empty takes the whole width, with no child spacing left over.
+TEST(Grid, SpannedWidgetFillsEmptyColumns)
+{
+  Grid* grid = new Grid(2, false);
+  grid->setChildSpacing(4);
+  Widget* w = new Widget;
+  grid->addChildInCell(w, 2, 1, HORIZONTAL | VERTICAL);
+
+  grid->setBounds(gfx::Rect(0, 0, 142, 50));
+  EXPECT_EQ(0, w->bounds().x);
+  EXPECT_EQ(142, w->bounds().w);
+  EXPECT_EQ(50, w->bounds().h);
+
+  delete grid;
+}
+
 TEST(Grid, Expand2ndWidget)
 {
   Grid* grid = new Grid(2, false);
