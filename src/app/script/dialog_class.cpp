@@ -167,6 +167,9 @@ struct Dialog {
   // dialog's grid instead of the window.
   std::unique_ptr<WorkspaceTab> tab;
 
+  // Set once close_all_dialogs() closed it.
+  bool closedAtExit = false;
+
   Dialog(const ui::Window::Type windowType, const std::string& title, bool sizeable)
     : window(windowType, title)
     , currentGrid(window.grid())
@@ -2390,11 +2393,24 @@ void register_dialog_class(lua_State* L)
 // close all opened Dialogs before closing the UI
 void close_all_dialogs()
 {
-  // An onclose can open or end dialogs, which changes the list
-  const std::vector<Dialog*> dialogs = all_dialogs;
-  for (Dialog* dlg : dialogs) {
-    if (std::find(all_dialogs.begin(), all_dialogs.end(), dlg) != all_dialogs.end())
-      dlg->window.closeWindow(nullptr);
+  // An onclose can open or end dialogs, which changes the list, so the
+  // dialogs that are left are closed again until each one was closed.
+  // The passes are limited for an onclose that always opens another.
+  for (int pass = 0; pass < 16; ++pass) {
+    std::vector<Dialog*> dialogs;
+    for (Dialog* dlg : all_dialogs) {
+      if (!dlg->closedAtExit)
+        dialogs.push_back(dlg);
+    }
+    if (dialogs.empty())
+      break;
+
+    for (Dialog* dlg : dialogs) {
+      if (std::find(all_dialogs.begin(), all_dialogs.end(), dlg) != all_dialogs.end()) {
+        dlg->closedAtExit = true;
+        dlg->window.closeWindow(nullptr);
+      }
+    }
   }
 }
 
