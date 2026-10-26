@@ -222,9 +222,10 @@ protected:
     // Wide enough for the widest visible row
     auto theme = SkinTheme::get(this);
     const int pad = 2 * guiscale();
+    const int expanderW = expander();
     int w = 0;
     for (const auto& [node, depth] : m_model.rows()) {
-      int rowW = 2 * pad + depth * indent() + expander() +
+      int rowW = 2 * pad + depth * indent() + expanderW +
                  int(std::ceil(font()->textLength(node->text)));
       if (!node->icon.empty()) {
         if (SkinPartPtr part = theme->getPartById(node->icon))
@@ -246,6 +247,7 @@ protected:
     const auto& rows = m_model.rows();
     const int h = rowHeight();
     const int pad = 2 * guiscale();
+    const int expanderW = expander();
     // The part of the content that the view shows
     gfx::Rect visible = m_view->viewportBounds();
     visible.offset(-bounds().origin());
@@ -276,7 +278,7 @@ protected:
                                     rc.y + (h - arrow->height()) / 2);
         }
       }
-      x += expander();
+      x += expanderW;
 
       // Icon
       if (!node->icon.empty()) {
