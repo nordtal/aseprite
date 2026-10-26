@@ -336,6 +336,22 @@ do
   assert(home == nil and table.concat(err, "\n"):find("JDK 25", 1, true), err and table.concat(err, "\n"))
   assert(not app.fs.isDirectory(app.fs.joinPath(javaDir, "25.part")))
 
+  -- A link where the unpack or the JDK goes stops it, and nothing is
+  -- unpacked or removed through the link
+  local elsewhere = app.fs.joinPath(tmp, "elsewhere")
+  write(app.fs.joinPath(elsewhere, "kept"), "x")
+  answer(sum)
+  for _, name in ipairs{ "25.part", "25" } do
+    local link = app.fs.joinPath(javaDir, name)
+    assert(os.execute("ln -s " .. quote(elsewhere) .. " " .. quote(link)))
+    home, err = java(clone)
+    assert(home == nil and table.concat(err, "\n"):find("could not be removed", 1, true),
+           err and table.concat(err, "\n"))
+    local files = app.fs.listFiles(elsewhere)
+    assert(#files == 1 and files[1] == "kept", name)
+    assert(os.execute("rm " .. quote(link)))
+  end
+
   -- Files that an earlier unpack left behind don't stop the next one,
   -- nor does a JDK folder without java
   app.fs.makeAllDirectories(app.fs.joinPath(javaDir, "25.part", "left-over"))

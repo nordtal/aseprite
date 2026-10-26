@@ -351,9 +351,14 @@ function season.java(clone, done)
         end
         -- The archive is unpacked into an empty folder, which a failed
         -- try leaves behind with whatever it unpacked. A target without
-        -- java is what a failed try left, too.
-        removeTree(part)
-        removeTree(target)
+        -- java is what a failed try left, too. A link or a file there
+        -- stays, and tar would unpack through it, so it stops the try.
+        for _, dir in ipairs({ part, target }) do
+          if not removeTree(dir) then
+            fail({ dir .. " could not be removed" })
+            return
+          end
+        end
         makeAllDirectories(part)
         s.run({ tar, "-xf", archive, "-C", part }, function(code, out, err)
           remove(archive)
@@ -366,7 +371,9 @@ function season.java(clone, done)
           elseif not rename(joinPath(part, files[1]), target) then
             problem = { "JDK " .. version .. " could not be moved to " .. target }
           end
-          removeTree(part)
+          if not removeTree(part) then
+            problem = problem or { part .. " could not be removed" }
+          end
           if problem then
             done(nil, problem)
             return
