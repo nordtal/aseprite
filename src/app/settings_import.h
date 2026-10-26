@@ -25,10 +25,12 @@ std::string find_aseprite_settings(const std::string& from, const std::string& t
 bool has_aseprite_settings(const std::string& dir);
 
 // Copies the preferences, palettes and shortcuts from the config
-// directory of Aseprite to the given one. Extensions, the recent
-// files and the access granted to scripts stay behind. Returns false
-// and copies nothing if "to" is "from" or lies inside it. A failed
-// copy throws and leaves "to" as it was.
+// directory of Aseprite to the given one. The palettes join the ones
+// "to" has, which stay as they are. Extensions, the recent files and
+// the access granted to scripts stay behind. Returns false and copies
+// nothing if "to" is "from" or lies inside it. A failed copy throws
+// and leaves "to" as it was. A failure while the copied files move
+// into place throws too, and the files moved by then stay in "to".
 bool import_aseprite_settings(const std::string& from, const std::string& to);
 
 // Asks whether to copy the settings of the Aseprite in the given

@@ -249,3 +249,24 @@ TEST(SettingsImport, RefusesATargetInsideTheSourceUnderAnotherName)
   if (!tried)
     GTEST_SKIP();
 }
+
+TEST(SettingsImport, MergesPalettesAndKeepsTheOnesThereAre)
+{
+  const std::string from = fresh_dir("from");
+  const std::string to = fresh_dir("to");
+  write(from, "palettes/a.gpl", "theirs\n");
+  write(from, "palettes/b.gpl", "theirs\n");
+  write(from, "palettes/more/d.gpl", "theirs\n");
+  write(from, "palettes/more/e.gpl", "theirs\n");
+  write(to, "palettes/a.gpl", "mine\n");
+  write(to, "palettes/c.gpl", "mine\n");
+  write(to, "palettes/more/d.gpl", "mine\n");
+
+  EXPECT_TRUE(import_aseprite_settings(from, to));
+
+  EXPECT_EQ("mine\n", read(to, "palettes/a.gpl"));
+  EXPECT_EQ("theirs\n", read(to, "palettes/b.gpl"));
+  EXPECT_EQ("mine\n", read(to, "palettes/c.gpl"));
+  EXPECT_EQ("mine\n", read(to, "palettes/more/d.gpl"));
+  EXPECT_EQ("theirs\n", read(to, "palettes/more/e.gpl"));
+}

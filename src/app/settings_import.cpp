@@ -98,6 +98,21 @@ static void copy_tree(const fs::path& from, const fs::path& to)
   }
 }
 
+// Moves what "from" has and "to" hasn't into "to", directory by
+// directory. Nothing that "to" has is replaced or deleted.
+static void merge_tree(const fs::path& from, const fs::path& to)
+{
+  const fs::file_status st = fs::symlink_status(to);
+  if (!fs::exists(st)) {
+    fs::rename(from, to);
+    return;
+  }
+  if (fs::is_directory(st) && fs::is_directory(fs::symlink_status(from))) {
+    for (const auto& entry : fs::directory_iterator(from))
+      merge_tree(entry.path(), to / entry.path().filename());
+  }
+}
+
 // Deletes the sections of the staged aseprite.ini that stay behind,
 // and throws if they are still in the saved file
 static void drop_sections(const fs::path& ini)
@@ -173,9 +188,14 @@ bool import_aseprite_settings(const std::string& from, const std::string& to)
     if (fs::is_regular_file(ini))
       drop_sections(ini);
 
+    // The palettes join the ones there are, the rest replaces its files
     for (const char* item : kSettings) {
       if (!fs::exists(fs::symlink_status(stage / item)))
         continue;
+      if (std::string(item) == "palettes") {
+        merge_tree(stage / item, target / item);
+        continue;
+      }
       fs::remove_all(target / item);
       fs::rename(stage / item, target / item);
     }
