@@ -188,16 +188,26 @@ int AppFS_removeDirectory(lua_State* L)
 
 // app.fs.removeTree(path) removes a folder and everything in it. A
 // link in it is removed itself, never what it points to. True if
-// there is no folder left; a file is no folder and stays.
+// there is no folder left; a file is no folder and stays, and so does
+// a folder that can't be looked at.
 int AppFS_removeTree(lua_State* L)
 {
   namespace fs = std::filesystem;
   const char* path = luaL_checkstring(L, 1);
-  const fs::path p = fs::u8path(path);
+  // A trailing separator or dot would make the system follow a link
+  // that the path names, so they go, and a path that ends in ".." is
+  // never removed
+  fs::path p = fs::u8path(path);
+  while ((!p.has_filename() || p.filename() == ".") && p.has_relative_path())
+    p = p.parent_path();
+  if (p.filename() == "..") {
+    lua_pushboolean(L, false);
+    return 1;
+  }
   std::error_code ec;
   const fs::file_status status = fs::symlink_status(p, ec);
   if (status.type() != fs::file_type::directory) {
-    lua_pushboolean(L, !fs::exists(status));
+    lua_pushboolean(L, status.type() == fs::file_type::not_found);
     return 1;
   }
 
@@ -205,7 +215,7 @@ int AppFS_removeTree(lua_State* L)
     return luaL_error(L, "the script doesn't have access to remove the directory '%s'", path);
 
   fs::remove_all(p, ec);
-  lua_pushboolean(L, !fs::exists(fs::symlink_status(p, ec)));
+  lua_pushboolean(L, fs::symlink_status(p, ec).type() == fs::file_type::not_found);
   return 1;
 }
 
