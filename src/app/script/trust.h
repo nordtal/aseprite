@@ -37,7 +37,10 @@ void trust_chunk(lua_State* L, int idx);
 
 // True when the call runs on the main thread and every Lua function
 // on its stack is trusted. A Lua function that was tail called counts
-// as untrusted, as its caller is gone from the stack.
+// as untrusted, as its caller is gone from the stack. So does a C
+// function on the stack that runs a coroutine, or that no Lua function
+// called (the app called it back), as the stack doesn't show what it
+// runs for; only the C function that asks is exempt.
 bool is_trusted_call(lua_State* L);
 
 }} // namespace app::script

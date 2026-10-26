@@ -101,7 +101,7 @@ protected:
     m_file = (std::filesystem::temp_directory_path() / "trust_tests_trusted.lua").string();
     std::ofstream(m_file) << "function direct() return (probe()) end\n"
                              "function through(f) f() return (probe()) end\n"
-                             "function callback(f) return (f()) end\n"
+                             "function callback(f, ...) return (f(...)) end\n"
                              "trustedLoad = probe()\n";
     L = luaL_newstate();
     luaL_openlibs(L);
@@ -184,6 +184,74 @@ TEST_F(Trust, AnUntrustedFunctionCalledByATrustedOneIsNotTrusted)
 TEST_F(Trust, ACoroutineIsNotTrusted)
 {
   EXPECT_FALSE(run("return coroutine.wrap(direct)()"));
+}
+
+// A command of the app that runs the trusted direct() on the main
+// thread, as a plugin command runs its onclick, and keeps in the
+// global "commanded" whether that call was trusted
+int command(lua_State* L)
+{
+  lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
+  lua_State* main = lua_tothread(L, -1);
+  lua_pop(L, 1);
+  lua_getglobal(main, "direct");
+  const bool trusted = (lua_pcall(main, 0, 1, 0) == LUA_OK && lua_toboolean(main, -1));
+  lua_pop(main, 1);
+  lua_pushboolean(main, trusted);
+  lua_setglobal(main, "commanded");
+  return 0;
+}
+
+// Calls the function below its nargs arguments from the app, as a
+// timer calls its ontick, and returns whether the command it runs was
+// trusted
+bool call_back(lua_State* L, int nargs = 0)
+{
+  lua_pushnil(L);
+  lua_setglobal(L, "commanded");
+  if (lua_pcall(L, nargs, 0, 0) != LUA_OK) {
+    ADD_FAILURE() << lua_tostring(L, -1);
+    lua_pop(L, 1);
+    return false;
+  }
+  lua_getglobal(L, "commanded");
+  EXPECT_TRUE(lua_isboolean(L, -1)) << "the command didn't run";
+  const bool result = lua_toboolean(L, -1);
+  lua_pop(L, 1);
+  return result;
+}
+
+TEST_F(Trust, ACommandThatACoroutineRunsIsNotTrusted)
+{
+  lua_register(L, "command", command);
+  // The command itself runs trusted code
+  lua_getglobal(L, "callback");
+  lua_getglobal(L, "command");
+  EXPECT_TRUE(call_back(L, 1));
+
+  // The app calls a coroutine back, and the coroutine runs the
+  // command: the stack of the main thread shows no untrusted function
+  ASSERT_EQ(LUA_OK, luaL_dostring(L, "return coroutine.wrap(function() command() end)"));
+  EXPECT_FALSE(call_back(L));
+
+  // The same, through a trusted function the app calls back with the
+  // coroutine
+  lua_getglobal(L, "callback");
+  ASSERT_EQ(LUA_OK, luaL_dostring(L, "return coroutine.wrap(function() command() end)"));
+  EXPECT_FALSE(call_back(L, 1));
+
+  lua_getglobal(L, "callback");
+  lua_getglobal(L, "coroutine");
+  lua_getfield(L, -1, "resume");
+  lua_remove(L, -2);
+  ASSERT_EQ(LUA_OK, luaL_dostring(L, "return coroutine.create(function() command() end)"));
+  EXPECT_FALSE(call_back(L, 2));
+}
+
+TEST_F(Trust, ACFunctionThatTheAppCallsBackIsNotTrusted)
+{
+  lua_pushcfunction(L, command);
+  EXPECT_FALSE(call_back(L));
 }
 
 TEST_F(Trust, AChunkWithTheNameOfTheTrustedFileIsNotTrusted)

@@ -30,6 +30,12 @@ const char kTrusted = 0;
 // makes
 const char kGlobals = 0;
 
+// The C functions through which a call runs on another thread, whose
+// stack the main thread's doesn't show: coroutine.resume() and the
+// function that coroutine.wrap() returns
+lua_CFunction g_resume = nullptr;
+lua_CFunction g_wrapped = nullptr;
+
 void push_trusted(lua_State* L)
 {
   if (lua_rawgetp(L, LUA_REGISTRYINDEX, &kTrusted) != LUA_TTABLE) {
@@ -171,6 +177,18 @@ void prepare_trust(lua_State* L)
   }
   lua_pop(L, 1);
 
+  lua_getglobal(L, LUA_COLIBNAME);
+  if (lua_istable(L, -1)) {
+    lua_getfield(L, -1, "resume");
+    g_resume = lua_tocfunction(L, -1);
+    lua_getfield(L, -2, "wrap");
+    luaL_loadstring(L, "");
+    lua_call(L, 1, 1);
+    g_wrapped = lua_tocfunction(L, -1);
+    lua_pop(L, 2);
+  }
+  lua_pop(L, 1);
+
   lua_getglobal(L, LUA_DBLIBNAME);
   if (lua_istable(L, -1)) {
     lua_getfield(L, -1, "getinfo");
@@ -227,9 +245,22 @@ bool is_trusted_call(lua_State* L)
 
   push_trusted(L);
   bool trusted = false;
-  lua_Debug ar;
+  lua_Debug ar, caller;
   for (int level = 0; lua_getstack(L, level, &ar); ++level) {
     lua_getinfo(L, "Stf", &ar);
+    if (lua_iscfunction(L, -1)) {
+      // A C function on the stack hides what it was called from when
+      // the app called it, or when it runs a coroutine
+      const lua_CFunction f = lua_tocfunction(L, -1);
+      lua_pop(L, 1);
+      const bool calledFromLua = lua_getstack(L, level + 1, &caller) &&
+                                 lua_getinfo(L, "S", &caller) && *caller.what != 'C';
+      if (f == g_resume || f == g_wrapped || (level > 0 && !calledFromLua)) {
+        trusted = false;
+        break;
+      }
+      continue;
+    }
     const Proto* p = proto_of(L, -1);
     lua_pop(L, 1);
     if (!p)
