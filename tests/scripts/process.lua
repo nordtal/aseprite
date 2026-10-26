@@ -138,6 +138,18 @@ do
   assert(p:wait() == 128 + 9)
 end
 
+-- What a program writes just before it exits arrives in full: 32 KiB
+-- in one write on stdout and on stderr, then the exit
+do
+  local line = string.rep("x", 63)
+  local text = string.rep(line .. "\n", 512)
+  local out, err, code = run{ cmd={ "sh", "-c", 'printf %s "$1"; printf %s "$1" >&2; exit 4', "sh", text } }
+  assert(code == 4)
+  assert(#out == 512, #out)
+  assert(#err == 512, #err)
+  assert(out[512] == line and err[512] == line)
+end
+
 -- A process can only start once
 do
   local p = Process{ cmd={ "true" } }
