@@ -1392,7 +1392,7 @@ private:
         "GfxMode",           "CanvasSize",        "CelProperties",     "ChangePixelFormat",
         "ExportSpriteSheet", "ImportSpriteSheet", "KeyboardShortcuts", "LayerProperties",
         "MaskColor",         "ExportFile",        "SpriteProperties",  "SpriteSize",
-        "UndoHistory",       "FileSelector",      "MiniEditor",        "BrightnessContrast",
+        "UndoHistory",       "FileSelector",      "PreviewWindow",     "BrightnessContrast",
         "ConvolutionMatrix", "Despeckle",         "HueSaturation",     "InvertColor",
         "Outline",           "Replace Color"
       };

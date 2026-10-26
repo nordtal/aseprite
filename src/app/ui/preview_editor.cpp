@@ -24,19 +24,22 @@
 #include "app/ui/editor/editor_view.h"
 #include "app/ui/editor/play_state.h"
 #include "app/ui/skin/skin_theme.h"
-#include "app/ui/status_bar.h"
 #include "app/ui/toolbar.h"
 #include "app/ui_context.h"
 #include "doc/sprite.h"
 #include "gfx/rect.h"
+#include "os/window.h"
 #include "ui/base.h"
 #include "ui/button.h"
 #include "ui/close_event.h"
+#include "ui/display.h"
 #include "ui/fit_bounds.h"
 #include "ui/message.h"
 #include "ui/system.h"
 
 #include "doc/tag.h"
+
+#include <algorithm>
 
 namespace app {
 
@@ -218,6 +221,22 @@ void PreviewEditorWindow::pressPlayButton()
   onPlayClicked();
 }
 
+gfx::Rect default_preview_bounds(const gfx::Rect& editorView, const gfx::Size& size, int gap)
+{
+  return gfx::Rect(std::max(editorView.x, editorView.x2() - gap - size.w),
+                   std::max(editorView.y, editorView.y2() - gap - size.h),
+                   size.w,
+                   size.h);
+}
+
+bool preview_place_changed(const gfx::Rect& openBounds,
+                           const gfx::Rect& openFrame,
+                           const gfx::Rect& closeBounds,
+                           const gfx::Rect& closeFrame)
+{
+  return closeBounds != openBounds || closeFrame != openFrame;
+}
+
 bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
@@ -225,27 +244,36 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
       Manager* manager = this->manager();
       Display* mainDisplay = manager->display();
 
-      gfx::Rect defaultBounds(mainDisplay->size() / 4);
       auto theme = SkinTheme::get(this);
-      gfx::Rect mainWindow = manager->bounds();
-
       int extra = theme->dimensions.miniScrollbarSize();
       if (get_multiple_displays()) {
         extra *= mainDisplay->scale();
       }
-      defaultBounds.x = mainWindow.x2() - ToolBar::instance()->sizeHint().w - defaultBounds.w -
-                        extra;
-      defaultBounds.y = mainWindow.y2() - StatusBar::instance()->sizeHint().h - defaultBounds.h -
-                        extra;
+
+      // Over the editor, whatever is docked around it
+      gfx::Rect area = manager->bounds();
+      if (View* view = (m_relatedEditor ? View::getView(m_relatedEditor) : nullptr))
+        area = view->viewportBounds();
+      gfx::Rect defaultBounds = default_preview_bounds(area, mainDisplay->size() / 4, extra);
 
       fit_bounds(mainDisplay, this, defaultBounds);
 
-      load_window_pos(this, "MiniEditor", false);
+      load_window_pos(this, "PreviewWindow", false);
       invalidate();
       break;
     }
 
-    case kCloseMessage: save_window_pos(this, "MiniEditor"); break;
+    case kCloseMessage:
+      // A window that closes with the main window skips
+      // Window::closeWindow(), which keeps the native frame
+      if (ownDisplay())
+        loadNativeFrame(display()->nativeWindow()->frame());
+      if (preview_place_changed(m_openBounds,
+                                m_openFrame,
+                                bounds(),
+                                ownDisplay() ? lastNativeFrame() : gfx::Rect()))
+        save_window_pos(this, "PreviewWindow");
+      break;
   }
 
   return Window::onProcessMessage(msg);
@@ -281,6 +309,15 @@ void PreviewEditorWindow::onWindowResize()
   DocView* view = UIContext::instance()->activeView();
   if (view)
     updateUsingEditor(view->editor());
+}
+
+void PreviewEditorWindow::onOpen(ui::Event& ev)
+{
+  Window::onOpen(ev);
+
+  // The place it opened at, once a native window has its own display
+  m_openBounds = bounds();
+  m_openFrame = (ownDisplay() ? display()->nativeWindow()->frame() : gfx::Rect());
 }
 
 bool PreviewEditorWindow::hasDocument() const
