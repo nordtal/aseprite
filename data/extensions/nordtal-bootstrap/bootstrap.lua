@@ -4,6 +4,22 @@
 -- the newest season repository the account can write to and loads
 -- the plugin in its designer/ folder. The plugin knows the resource
 -- pack; this script doesn't.
+--
+-- The app trusts this file like season.lua, and it follows the same
+-- rules: every global it uses is kept when it loads, no string
+-- methods, no tail calls.
+
+local app, Dialog, Process = app, Dialog, Process
+local find, format = string.find, string.format
+local concat, insert = table.concat, table.insert
+local max = math.max
+local getenv = os.getenv
+local fs = app.fs
+local joinPath, isFile, isDirectory, listFiles, makeAllDirectories, chooseFolder =
+      fs.joinPath, fs.isFile, fs.isDirectory, fs.listFiles, fs.makeAllDirectories, fs.chooseFolder
+local clipboard = app.clipboard
+local windows = app.os.windows
+local preferences = app.preferences
 
 local strings = {
   en = {
@@ -59,19 +75,19 @@ local strings = {
 }
 
 local function tr(key, ...)
-  local lang = strings[app.preferences.general.language] or strings.en
-  return string.format(lang[key] or strings.en[key], ...)
+  local lang = strings[preferences.general.language] or strings.en
+  return (format(lang[key] or strings.en[key], ...))
 end
 
-local season, tools, plugin, exitPlugin
+local season, plugin, exitPlugin
 local dlg
 
 local function home()
-  return os.getenv("HOME") or os.getenv("USERPROFILE") or app.fs.userDocsPath
+  return (getenv("HOME") or getenv("USERPROFILE") or fs.userDocsPath)
 end
 
 local function cloneRoot()
-  return plugin.preferences.cloneRoot or app.fs.joinPath(home(), "Nordtal")
+  return plugin.preferences.cloneRoot or joinPath(home(), "Nordtal")
 end
 
 -- One dialog at a time, replaced by each step
@@ -86,14 +102,14 @@ end
 
 -- A label for each of the last lines of what a tool printed
 local function addLines(d, lines)
-  for i = math.max(1, #lines - 4), #lines do
+  for i = max(1, #lines - 4), #lines do
     d:newrow()
     d:label{ text=lines[i] }
   end
 end
 
 local function openUrl(url)
-  local cmd = app.os.windows and { "explorer.exe", url } or { "/usr/bin/open", url }
+  local cmd = windows and { "explorer.exe", url } or { "/usr/bin/open", url }
   Process{ cmd=cmd }:start()
 end
 
@@ -104,10 +120,10 @@ local function loadPlugin(dir, repo)
   exitPlugin, msg = season.loadPlugin(dir, plugin, {
     repository=season.org .. "/" .. repo.name,
     clone=dir,
-    gh=tools.gh,
-    git=tools.git,
-    env=tools.env })
-  if not exitPlugin and app.fs.isFile(app.fs.joinPath(dir, "designer", "init.lua")) then
+    gh=season.gh,
+    git=season.git,
+    env=season.env() })
+  if not exitPlugin and isFile(joinPath(dir, "designer", "init.lua")) then
     show(function(d)
       d:label{ text=tr("pluginFailed") }
       addLines(d, { msg })
@@ -119,17 +135,18 @@ end
 -- problem is a list of lines that tell why the last try failed
 offerClone = function(repo, problem)
   local root = cloneRoot()
-  local dir = app.fs.joinPath(root, repo.name)
+  local dir = joinPath(root, repo.name)
   if season.isClone(dir) then
     if dlg then dlg:close() end
-    return loadPlugin(dir, repo)
+    loadPlugin(dir, repo)
+    return
   end
   show(function(d)
     d:label{ text=tr("cloneText", repo.name) }
     d:newrow()
     d:label{ id="path", text=dir }
     d:button{ text=tr("change"), onclick=function()
-      local chosen = app.fs.chooseFolder{ title=tr("chooseFolder"), path=root }
+      local chosen = chooseFolder{ title=tr("chooseFolder"), path=root }
       if chosen then
         plugin.preferences.cloneRoot = chosen
         offerClone(repo)
@@ -139,21 +156,24 @@ offerClone = function(repo, problem)
       addLines(d, problem)
     end
     d:button{ id="clone", text=tr("clone"), focus=true, onclick=function()
-      if app.fs.isDirectory(dir) and #app.fs.listFiles(dir) > 0 then
-        return offerClone(repo, { tr("notAClone", dir) })
+      if isDirectory(dir) and #listFiles(dir) > 0 then
+        offerClone(repo, { tr("notAClone", dir) })
+        return
       end
-      app.fs.makeAllDirectories(root)
+      makeAllDirectories(root)
       show(function(d2) d2:label{ text=tr("cloning", repo.name) } end)
-      season.clone(tools, season.url(repo), dir, function(ok, err)
+      season.clone(season.url(repo), dir, function(ok, err)
         if ok then
           if dlg then dlg:close() end
-          return loadPlugin(dir, repo)
+          loadPlugin(dir, repo)
+          return
         end
-        local text = table.concat(err, "\n")
-        if text:find("xcrun", 1, true) or text:find("developer path", 1, true) then
-          return offerClone(repo, { tr("commandLineTools") })
+        local text = concat(err, "\n")
+        if find(text, "xcrun", 1, true) or find(text, "developer path", 1, true) then
+          offerClone(repo, { tr("commandLineTools") })
+          return
         end
-        table.insert(err, 1, tr("cloneFailed"))
+        insert(err, 1, tr("cloneFailed"))
         offerClone(repo, err)
       end)
     end }
@@ -164,26 +184,28 @@ local function refuse(login)
   show(function(d)
     d:label{ text=tr("noAccess", login or "?") }
     d:button{ text=tr("signOut"), onclick=function()
-      season.signOut(tools, function() signIn() end)
+      season.signOut(function() signIn() end)
     end }
     d:button{ text=tr("close") }
   end)
 end
 
 findSeason = function()
-  season.find(tools, function(repo, err)
+  season.find(function(repo, err)
     if repo then
-      return offerClone(repo)
+      offerClone(repo)
+      return
     end
     if err then
-      return show(function(d)
+      show(function(d)
         d:label{ text=tr("findFailed") }
         addLines(d, err)
         d:button{ text=tr("tryAgain"), onclick=function() findSeason() end }
         d:button{ text=tr("close") }
       end)
+      return
     end
-    season.login(tools, refuse)
+    season.login(refuse)
   end)
 end
 
@@ -193,14 +215,15 @@ signIn = function()
     d:button{ text=tr("signIn"), focus=true, onclick=function()
       local login, cancelled
       show(function(d2) d2:label{ id="status", text=tr("waiting") } end)
-      login = season.signIn(tools,
-        function(code, url)
+      login = season.signIn(
+        function(code)
           show(function(d2)
             d2:label{ text=tr("codeText") }
             d2:newrow()
             d2:label{ id="code", text=code }
-            d2:button{ text=tr("copyCode"), onclick=function() app.clipboard.text = code end }
-            d2:button{ text=tr("openGitHub"), focus=true, onclick=function() openUrl(url) end }
+            d2:button{ text=tr("copyCode"), onclick=function() clipboard.text = code end }
+            d2:button{ text=tr("openGitHub"), focus=true,
+                       onclick=function() openUrl(season.deviceUrl) end }
             d2:newrow()
             d2:label{ text=tr("waiting") }
             d2:button{ text=tr("close") }
@@ -215,17 +238,17 @@ signIn = function()
         end,
         function(ok, err)
           if ok then
-            return findSeason()
+            findSeason()
+          elseif cancelled then
+            signIn()
+          else
+            show(function(d2)
+              d2:label{ text=tr("signInFailed") }
+              addLines(d2, err)
+              d2:button{ text=tr("tryAgain"), onclick=function() signIn() end }
+              d2:button{ text=tr("close") }
+            end)
           end
-          if cancelled then
-            return signIn()
-          end
-          show(function(d2)
-            d2:label{ text=tr("signInFailed") }
-            addLines(d2, err)
-            d2:button{ text=tr("tryAgain"), onclick=function() signIn() end }
-            d2:button{ text=tr("close") }
-          end)
         end)
     end }
     d:button{ text=tr("close") }
@@ -233,7 +256,7 @@ signIn = function()
 end
 
 start = function()
-  season.signedIn(tools, function(ok)
+  season.signedIn(function(ok)
     if ok then
       findSeason()
     else
@@ -247,10 +270,9 @@ function init(p)
   if not app.isUIAvailable then
     return
   end
-  season = dofile(app.fs.joinPath(plugin.path, "season.lua"))
-  tools = season.tools(plugin.path)
+  season = plugin:loadTrusted(joinPath(plugin.path, "season.lua"))()
   -- A build without the bundled tools runs without the bootstrap
-  if not tools then
+  if not season.available then
     return
   end
   plugin:newCommand{
@@ -258,7 +280,7 @@ function init(p)
     title=tr("changeFolder"),
     group="file_app",
     onclick=function()
-      local chosen = app.fs.chooseFolder{ title=tr("chooseFolder"), path=cloneRoot() }
+      local chosen = chooseFolder{ title=tr("chooseFolder"), path=cloneRoot() }
       if chosen then
         plugin.preferences.cloneRoot = chosen
       end

@@ -3,10 +3,20 @@
 
 if app.os.windows then return end
 
-local season = dofile(app.fs.joinPath(app.fs.currentPath, "..", "data", "extensions",
-                                      "nordtal-bootstrap", "season.lua"))
+local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
+
+-- gh never sees a token of the environment, so the test runs with one
+if not os.getenv("GH_TOKEN") or not os.getenv("GITHUB_TOKEN") then
+  local script = debug.getinfo(1, "S").source:sub(2)
+  assert(os.execute("GH_TOKEN=from-env GITHUB_TOKEN=from-env " .. quote(app.fs.appPath) ..
+                    " -b --script " .. quote(script)))
+  return
+end
+
+local source = app.fs.joinPath(app.fs.currentPath, "..", "data", "extensions",
+                               "nordtal-bootstrap", "season.lua")
 local tmp = app.fs.joinPath(app.fs.tempPath, "nordtal-bootstrap-test")
-os.execute("rm -rf '" .. tmp .. "'")
+os.execute("rm -rf " .. quote(tmp))
 app.fs.makeAllDirectories(tmp)
 
 local function write(fn, text)
@@ -16,33 +26,50 @@ local function write(fn, text)
   f:close()
 end
 
+local function read(fn)
+  local f = io.open(fn)
+  local text = f:read("a")
+  f:close()
+  return text
+end
+
+-- season.lua finds its tools next to itself, so the test uses a copy
+local ext = app.fs.joinPath(tmp, "nordtal-bootstrap")
+write(app.fs.joinPath(ext, "season.lua"), read(source))
+local function loadSeason() return dofile(app.fs.joinPath(ext, "season.lua")) end
+
 -- Without a bundled gh there is no bootstrap
-assert(season.tools(tmp) == nil)
+assert(loadSeason().available == false)
 
 -- A stub gh that answers like gh does, and logs its environment
-local gh = app.fs.joinPath(tmp, "tools", "gh", "bin", "gh")
+local gh = app.fs.joinPath(ext, "tools", "gh", "bin", "gh")
 write(gh, [[#!/bin/sh
 echo "$GH_CONFIG_DIR|${GH_TOKEN-unset}|${GITHUB_TOKEN-unset}|$*" >> "$(dirname "$0")/calls"
 case "$1 $2" in
   "auth status") [ -f "$GH_CONFIG_DIR/hosts.yml" ] ;;
   "auth login")
     echo >&2
-    echo "! First copy your one-time code: ABCD-1234" >&2
+    echo "! One-time code (ABCD-1234) copied to clipboard" >&2
     echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
-    mkdir -p "$GH_CONFIG_DIR" && echo "github.com:" > "$GH_CONFIG_DIR/hosts.yml" ;;
-  "auth logout") rm -f "$GH_CONFIG_DIR/hosts.yml" ;;
+    sleep 1
+    mkdir -p "$GH_CONFIG_DIR" && echo "github.com:" > "$GH_CONFIG_DIR/hosts.yml"
+    # Without --insecure-storage gh keeps the token in the keychain
+    case "$*" in *--insecure-storage*) echo "    oauth_token: from-stub-gh" >> "$GH_CONFIG_DIR/hosts.yml" ;; esac ;;
   "auth git-credential") cat > /dev/null; printf 'username=designer\npassword=from-stub-gh\n' ;;
   "api user") echo designer ;;
   "repo list") cat "$(dirname "$0")/repos.json" ;;
   *) exit 1 ;;
 esac
 ]])
-os.execute("chmod +x '" .. gh .. "'")
-local tools = season.tools(tmp)
-assert(tools.gh == gh)
-assert(tools.git == "/usr/bin/git")
-assert(tools.env.GH_CONFIG_DIR == app.fs.joinPath(app.fs.userConfigPath, "gh"))
-tools.env.GH_CONFIG_DIR = app.fs.joinPath(tmp, "gh-config")
+os.execute("chmod +x " .. quote(gh))
+local season = loadSeason()
+assert(season.available)
+assert(season.gh == gh)
+assert(season.git == "/usr/bin/git")
+local configDir = app.fs.joinPath(app.fs.userConfigPath, "gh")
+assert(season.configDir == configDir)
+assert(season.env().GH_CONFIG_DIR == configDir)
+os.execute("rm -rf " .. quote(configDir))
 
 -- The newest season the account can write to, archived ones left out
 do
@@ -62,58 +89,72 @@ do
   assert(season.newestWritable({ { name="season-2", viewerPermission="TRIAGE" } }) == nil)
 end
 
--- Signing in shows the device code, then gh has the account
+-- Signing in shows the device code once, while gh keeps waiting for
+-- the browser, then gh has the account and its token in its own config
 do
   local signedIn
-  season.signedIn(tools, function(ok) signedIn = ok end):wait()
+  season.signedIn(function(ok) signedIn = ok end):wait()
   assert(signedIn == false)
 
-  local code, url, ok
-  season.signIn(tools, function(c, u) code, url = c, u end,
-                function(o) ok = o end):wait()
-  assert(code == "ABCD-1234")
-  assert(url == "https://github.com/login/device")
+  local codes, runningAtCode, ok, p = {}, nil, nil, nil
+  p = season.signIn(function(c)
+                      table.insert(codes, c)
+                      runningAtCode = p.isRunning
+                    end,
+                    function(o) ok = o end)
+  p:wait()
+  assert(#codes == 1 and codes[1] == "ABCD-1234")
+  assert(runningAtCode == true)
   assert(ok)
-  season.signedIn(tools, function(o) signedIn = o end):wait()
+  assert(season.deviceUrl == "https://github.com/login/device")
+  assert(read(app.fs.joinPath(configDir, "hosts.yml")):find("oauth_token: from-stub-gh", 1, true))
+  season.signedIn(function(o) signedIn = o end):wait()
   assert(signedIn == true)
 
   local login
-  season.login(tools, function(l) login = l end):wait()
+  season.login(function(l) login = l end):wait()
   assert(login == "designer")
 end
 
 -- gh never gets a token of the environment, only its own config
 do
-  local f = io.open(app.fs.joinPath(tmp, "tools", "gh", "bin", "calls"))
+  assert(os.getenv("GH_TOKEN") == "from-env")
+  local f = io.open(app.fs.joinPath(ext, "tools", "gh", "bin", "calls"))
   for line in f:lines() do
-    assert(line:find(tools.env.GH_CONFIG_DIR .. "|unset|unset|", 1, true) == 1)
+    assert(line:find(configDir .. "|unset|unset|", 1, true) == 1, line)
   end
   f:close()
 end
 
 -- The account's repositories decide which season is cloned
 do
-  write(app.fs.joinPath(tmp, "tools", "gh", "bin", "repos.json"), [[
+  write(app.fs.joinPath(ext, "tools", "gh", "bin", "repos.json"), [[
 [{"isArchived":false,"name":"season-2","viewerPermission":"WRITE"},
  {"isArchived":false,"name":"season-3","viewerPermission":"READ"}]
 ]])
   local repo
-  season.find(tools, function(r) repo = r end):wait()
+  season.find(function(r) repo = r end):wait()
   assert(repo.name == "season-2")
   assert(season.url(repo) == "https://github.com/nordtal/season-2.git")
 
-  write(app.fs.joinPath(tmp, "tools", "gh", "bin", "repos.json"),
+  write(app.fs.joinPath(ext, "tools", "gh", "bin", "repos.json"),
         '[{"isArchived":false,"name":"season-2","viewerPermission":"READ"}]')
   local called = false
-  season.find(tools, function(r) called = true; repo = r end):wait()
+  season.find(function(r) called = true; repo = r end):wait()
   assert(called and repo == nil)
 end
 
 -- Signing out removes the account
 do
   local signedIn
-  season.signOut(tools, function() end):wait()
-  season.signedIn(tools, function(ok) signedIn = ok end):wait()
+  local out
+  season.signOut(function(ok) out = ok end)
+  assert(out == true)
+  -- gh auth logout would delete a keychain entry an installed gh uses
+  for line in io.lines(app.fs.joinPath(ext, "tools", "gh", "bin", "calls")) do
+    assert(not line:find("|auth logout", 1, true), line)
+  end
+  season.signedIn(function(ok) signedIn = ok end):wait()
   assert(signedIn == false)
 end
 
@@ -127,7 +168,7 @@ do
   local dir = app.fs.joinPath(tmp, "Nordtal", "season-2")
   assert(not season.isClone(dir))
   local ok, err
-  season.clone(tools, "file://" .. origin, dir, function(o, e) ok, err = o, e end):wait()
+  season.clone("file://" .. origin, dir, function(o, e) ok, err = o, e end):wait()
   assert(ok, err and table.concat(err, "\n"))
   assert(season.isClone(dir))
 
@@ -142,23 +183,28 @@ do
   local helpers = config("credential.helper")
   assert(#helpers == 2)
   assert(helpers[1] == "")
-  assert(helpers[2] == "!GH_CONFIG_DIR='" .. tools.env.GH_CONFIG_DIR .. "' '" .. gh .. "' auth git-credential")
+  assert(helpers[2] == "!unset GH_TOKEN GITHUB_TOKEN; GH_TELEMETRY=0 GH_CONFIG_DIR=" ..
+                      quote(configDir) .. " " .. quote(gh) .. " auth git-credential")
 
   -- git in the clone gets its credentials from the bundled gh, even
-  -- from a terminal without the app's environment
+  -- from a terminal without the app's environment and with tokens in it
   local p = io.popen("printf 'protocol=https\\nhost=github.com\\n\\n' | " ..
-                     "GIT_TERMINAL_PROMPT=0 GH_CONFIG_DIR=/nowhere git -C '" .. dir .. "' credential fill")
+                     "GIT_TERMINAL_PROMPT=0 GH_CONFIG_DIR=/nowhere GH_TOKEN=t GITHUB_TOKEN=t " ..
+                     "git -C '" .. dir .. "' credential fill")
   local filled = p:read("a")
   p:close()
   assert(filled:find("password=from-stub-gh", 1, true), filled)
-  local f = io.open(app.fs.joinPath(tmp, "tools", "gh", "bin", "calls"))
+  local f = io.open(app.fs.joinPath(ext, "tools", "gh", "bin", "calls"))
   local last
   for line in f:lines() do last = line end
   f:close()
-  assert(last == tools.env.GH_CONFIG_DIR .. "|unset|unset|auth git-credential get", last)
+  assert(last == configDir .. "|unset|unset|auth git-credential get", last)
 
-  -- The clone's plugin gets its folder, its own preferences and the context
-  local plugin = { preferences={ cloneRoot="x" } }
+  -- The clone's plugin gets its folder, its own preferences and the
+  -- context. The plugin object of the app loads it trusted; here the
+  -- stand-in loads it as any file.
+  local plugin = { preferences={ cloneRoot="x" },
+                   loadTrusted=function(_, fn) return assert(loadfile(fn)) end }
   loaded = nil
   local exitPlugin, msg = season.loadPlugin(dir, plugin, { clone=dir })
   assert(exitPlugin, msg)
@@ -192,13 +238,21 @@ end
 
 -- The device code is found in what gh prints
 do
-  local code, url = season.parseDeviceCode("! First copy your one-time code: 1A2B-3C4D")
-  assert(code == "1A2B-3C4D" and url == nil)
+  assert(season.parseDeviceCode("! First copy your one-time code: 1A2B-3C4D") == "1A2B-3C4D")
   -- Newer versions of gh copy the code themselves
-  code, url = season.parseDeviceCode("! One-time code (E0C5-C9BA) copied to clipboard")
-  assert(code == "E0C5-C9BA" and url == nil)
-  code, url = season.parseDeviceCode("Open this URL to continue in your web browser: https://github.com/login/device")
-  assert(code == nil and url == "https://github.com/login/device")
+  assert(season.parseDeviceCode("! One-time code (E0C5-C9BA) copied to clipboard") == "E0C5-C9BA")
+  assert(season.parseDeviceCode("Open this URL to continue in your web browser: https://github.com/login/device") == nil)
 end
 
-os.execute("rm -rf '" .. tmp .. "'")
+-- The trusted files make no tail call to a Lua function, which would
+-- drop their caller from the stack and lose the trust
+for _, name in ipairs{ "season.lua", "bootstrap.lua" } do
+  local n = 0
+  for line in io.lines(app.fs.joinPath(app.fs.filePath(source), name)) do
+    n = n + 1
+    local callee = line:match("^[^-]*return%s+([%a_][%w_.:]*)%s*[%(%{\"]")
+    assert(not callee or callee == "function", name .. ":" .. n .. ": " .. line)
+  end
+end
+
+os.execute("rm -rf " .. quote(tmp))
