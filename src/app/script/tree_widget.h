@@ -69,6 +69,10 @@ public:
 
   const TreeRows& rows() const { return m_rows; }
 
+  // True when no node has children, so the rows reserve no column for
+  // the expander arrow
+  bool flat() const;
+
   TreeNode* selected() const { return m_selected; }
   void setSelected(TreeNode* node);
 

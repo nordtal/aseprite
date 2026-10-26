@@ -86,6 +86,13 @@ void TreeModel::nodeChanged()
   RowsChange();
 }
 
+bool TreeModel::flat() const
+{
+  return std::none_of(m_nodes.begin(), m_nodes.end(), [](const auto& node) {
+    return !node->children.empty();
+  });
+}
+
 void TreeModel::addRows(const TreeNodes& nodes, int depth)
 {
   for (const auto& node : nodes) {
@@ -188,6 +195,9 @@ public:
 
   int indent() const { return 12 * guiscale(); }
 
+  // The width of the column for the expander arrow
+  int expander() const { return (m_model.flat() ? 0 : indent()); }
+
   gfx::Rect rowBounds(int row) const
   {
     const gfx::Rect rc = clientBounds();
@@ -214,7 +224,8 @@ protected:
     const int pad = 2 * guiscale();
     int w = 0;
     for (const auto& [node, depth] : m_model.rows()) {
-      int rowW = 2 * pad + (depth + 1) * indent() + int(std::ceil(font()->textLength(node->text)));
+      int rowW = 2 * pad + depth * indent() + expander() +
+                 int(std::ceil(font()->textLength(node->text)));
       if (!node->icon.empty()) {
         if (SkinPartPtr part = theme->getPartById(node->icon))
           rowW += part->bitmap(0)->width() + pad;
@@ -265,7 +276,7 @@ protected:
                                     rc.y + (h - arrow->height()) / 2);
         }
       }
-      x += indent();
+      x += expander();
 
       // Icon
       if (!node->icon.empty()) {

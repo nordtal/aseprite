@@ -1161,9 +1161,10 @@ void SkinTheme::initWidget(Widget* widget)
     case kRadioWidget:  widget->setStyle(styles.radioButton()); break;
 
     case kEntryWidget:
-      BORDER4(parts.sunkenNormal()->bitmapW()->width(),
+      // The frame and a gap of 2 points between it and the text
+      BORDER4(parts.sunkenNormal()->bitmapW()->width() + 2 * scale,
               parts.sunkenNormal()->bitmapN()->height(),
-              parts.sunkenNormal()->bitmapE()->width(),
+              parts.sunkenNormal()->bitmapE()->width() + 2 * scale,
               parts.sunkenNormal()->bitmapS()->height());
       widget->setChildSpacing(3 * scale);
       break;
