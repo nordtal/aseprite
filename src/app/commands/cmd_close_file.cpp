@@ -12,11 +12,13 @@
 #include "app/app.h"
 #include "app/commands/command.h"
 #include "app/commands/commands.h"
+#include "app/doc.h"
 #include "app/ui/doc_view.h"
 #include "app/ui/workspace.h"
 #include "app/ui_context.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace app {
 
@@ -64,25 +66,26 @@ protected:
     if (!workspace) // Workspace (main window) can be null if we are in --batch mode
       return;
 
-    // Collect all document views
-    auto collect = [workspace] {
-      DocViews docViews;
-      for (auto view : *workspace) {
-        DocView* docView = view->docView();
-        if (docView)
-          docViews.push_back(docView);
-      }
-      return docViews;
-    };
+    // Closing a view can run scripts that move a document into another
+    // view (a script tab that embeds a sprite), so the documents are
+    // collected first and each one's current views are closed
+    UIContext* ctx = UIContext::instance();
+    std::vector<doc::ObjectId> docIds;
+    for (auto view : *workspace) {
+      DocView* docView = view->docView();
+      if (docView && std::find(docIds.begin(), docIds.end(), docView->document()->id()) ==
+                       docIds.end())
+        docIds.push_back(docView->document()->id());
+    }
 
-    // Closing a view can run scripts that delete other views (a
-    // script tab that embeds a sprite), so each one is looked up again
-    for (auto docView : collect()) {
-      const DocViews current = collect();
-      if (std::find(current.begin(), current.end(), docView) == current.end())
-        continue;
-      if (!workspace->closeView(docView, m_quitting))
-        break;
+    for (doc::ObjectId id : docIds) {
+      while (Doc* doc = doc::get<Doc>(id)) {
+        const DocViews views = ctx->getAllDocViews(doc);
+        if (views.empty())
+          break;
+        if (!workspace->closeView(views.front(), m_quitting))
+          return;
+      }
     }
   }
 

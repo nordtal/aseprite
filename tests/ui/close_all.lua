@@ -22,8 +22,7 @@ ui_test(function()
   app.events:off(onsite)
 
   assert(moved)
-  for _, spr in ipairs(app.sprites) do
-    assert(spr ~= first)
-  end
+  -- The second sprite is closed in the tab that took it
+  assert(#app.sprites == 0)
 
 end)
