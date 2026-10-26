@@ -75,10 +75,7 @@ DocView* UIContext::activeView() const
     return nullptr;
 
   WorkspaceView* view = workspace->activeView();
-  if (DocView* docView = dynamic_cast<DocView*>(view))
-    return docView;
-  else
-    return nullptr;
+  return (view ? view->docView() : nullptr);
 }
 
 void UIContext::setActiveView(DocView* docView)
@@ -102,10 +99,13 @@ void UIContext::setActiveView(DocView* docView)
   Editor* editor = nullptr;
   if (docView) {
     editor = docView->editor();
-    mainWin->getTabsBar()->selectTab(docView);
 
-    if (mainWin->getWorkspace()->activeView() != docView)
-      mainWin->getWorkspace()->setActiveView(docView);
+    // An embedded view is selected through its host's tab
+    WorkspaceView* view = docView->workspaceView();
+    mainWin->getTabsBar()->selectTab(dynamic_cast<TabView*>(view));
+
+    if (mainWin->getWorkspace()->activeView() != view)
+      mainWin->getWorkspace()->setActiveView(view);
 
     if (editor)
       editor->requestFocus();
@@ -222,7 +222,7 @@ DocView* UIContext::getFirstDocView(Doc* document) const
     return nullptr;
 
   for (WorkspaceView* view : *workspace) {
-    if (DocView* docView = dynamic_cast<DocView*>(view)) {
+    if (DocView* docView = view->docView()) {
       if (docView->document() == document) {
         return docView;
       }
@@ -238,7 +238,7 @@ DocViews UIContext::getAllDocViews(Doc* document) const
   // The workspace can be nullptr when we are running in batch mode.
   if (Workspace* workspace = App::instance()->workspace()) {
     for (WorkspaceView* view : *workspace) {
-      if (DocView* docView = dynamic_cast<DocView*>(view)) {
+      if (DocView* docView = view->docView()) {
         if (docView->document() == document) {
           docViews.push_back(docView);
         }
@@ -310,10 +310,13 @@ void UIContext::onAddDocument(Doc* doc)
   if (!App::instance()->isGui())
     return;
 
-  // Add a new view for this document
-  DocView* view = new DocView(lastSelectedDoc(),
-                              DocView::Normal,
-                              App::instance()->mainWindow()->getPreviewEditor());
+  addDocView(doc);
+}
+
+void UIContext::addDocView(Doc* doc)
+{
+  DocView* view =
+    new DocView(doc, DocView::Normal, App::instance()->mainWindow()->getPreviewEditor());
 
   // Add a tab with the new view for the document
   App::instance()->workspace()->addView(view);
@@ -329,10 +332,21 @@ void UIContext::onRemoveDocument(Doc* doc)
   if (isUIAvailable()) {
     Workspace* workspace = App::instance()->workspace();
 
+    bool embedded = false;
     for (DocView* docView : getAllDocViews(doc)) {
-      workspace->removeView(docView);
-      delete docView;
+      if (WorkspaceView* host = docView->host()) {
+        host->removeEmbeddedView(docView);
+        embedded = true;
+      }
+      else {
+        workspace->removeView(docView);
+        delete docView;
+      }
     }
+
+    // The host stays active and has to show that it has no document
+    if (embedded)
+      workspace->ActiveViewChanged();
   }
 }
 

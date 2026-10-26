@@ -308,12 +308,15 @@ bool DocView::onCloseView(Workspace* workspace, bool quitting)
     m_editor->dropMovingPixels();
 
   // If there is another view for this document, just close the view.
-  for (auto view : *workspace) {
-    DocView* docView = dynamic_cast<DocView*>(view);
-    if (docView && docView != this && docView->document() == document()) {
-      workspace->removeView(this);
-      delete this;
-      return true;
+  // An embedded view is the only view of its document.
+  if (!m_host) {
+    for (auto view : *workspace) {
+      DocView* docView = view->docView();
+      if (docView && docView != this && docView->document() == document()) {
+        workspace->removeView(this);
+        delete this;
+        return true;
+      }
     }
   }
 
