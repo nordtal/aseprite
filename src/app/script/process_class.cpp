@@ -18,8 +18,10 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,6 +37,10 @@
   #include <poll.h>
   #include <sys/wait.h>
   #include <unistd.h>
+  #ifdef __APPLE__
+    #include <crt_externs.h>
+    #define environ (*_NSGetEnviron())
+  #endif
 #endif
 
 namespace app { namespace script {
@@ -123,6 +129,8 @@ public:
   lua_State* L = nullptr;
   std::vector<std::string> cmd;
   std::string cwd;
+  // Variables that differ from the app's environment, nullopt removes one
+  std::map<std::string, std::optional<std::string>> env;
   bool started = false;
   bool running = false;
   bool dispatching = false;
@@ -225,6 +233,46 @@ private:
     return (ext == ".bat" || ext == ".cmd");
   }
 
+  // Names compare without case, as Windows does
+  struct LessNoCase {
+    bool operator()(const std::wstring& a, const std::wstring& b) const
+    {
+      return _wcsicmp(a.c_str(), b.c_str()) < 0;
+    }
+  };
+
+  // The app's environment with the changes of env, sorted by name as
+  // CreateProcessW wants it. Empty if env is.
+  std::wstring environment_block() const
+  {
+    if (env.empty())
+      return std::wstring();
+    std::map<std::wstring, std::wstring, LessNoCase> vars;
+    if (wchar_t* strings = GetEnvironmentStringsW()) {
+      for (const wchar_t* p = strings; *p; p += wcslen(p) + 1) {
+        const std::wstring item = p;
+        // Names like "=C:" start with an equals sign
+        const std::size_t eq = item.find(L'=', 1);
+        if (eq != std::wstring::npos)
+          vars[item.substr(0, eq)] = item.substr(eq + 1);
+      }
+      FreeEnvironmentStringsW(strings);
+    }
+    for (const auto& [name, value] : env) {
+      if (value)
+        vars[base::from_utf8(name)] = base::from_utf8(*value);
+      else
+        vars.erase(base::from_utf8(name));
+    }
+    std::wstring block;
+    for (const auto& [name, value] : vars) {
+      block += name + L"=" + value;
+      block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
+  }
+
   std::string spawn()
   {
     // Windows runs a batch file through cmd.exe, which reads the
@@ -266,6 +314,7 @@ private:
       cmdline += quote_arg(base::from_utf8(arg), batch);
     }
     const std::wstring wcwd = base::from_utf8(cwd);
+    std::wstring envBlock = environment_block();
 
     // The child inherits its standard handles and nothing else
     HANDLE inherited[3];
@@ -310,8 +359,9 @@ private:
                         nullptr,
                         nullptr,
                         TRUE,
-                        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
-                        nullptr,
+                        CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT |
+                          CREATE_UNICODE_ENVIRONMENT,
+                        env.empty() ? nullptr : envBlock.data(),
                         wcwd.empty() ? nullptr : wcwd.c_str(),
                         &si.StartupInfo,
                         &pi);
@@ -421,6 +471,25 @@ private:
       argv.push_back(arg.data());
     argv.push_back(nullptr);
 
+    // The environment is made before fork(), as the child may only
+    // call async-signal-safe functions
+    std::vector<std::string> envStrings;
+    std::vector<char*> envp;
+    if (!env.empty()) {
+      for (char** p = environ; *p; ++p) {
+        const char* eq = std::strchr(*p, '=');
+        if (!eq || env.find(std::string(*p, eq - *p)) == env.end())
+          envStrings.push_back(*p);
+      }
+      for (const auto& [name, value] : env) {
+        if (value)
+          envStrings.push_back(name + "=" + *value);
+      }
+      for (auto& item : envStrings)
+        envp.push_back(item.data());
+      envp.push_back(nullptr);
+    }
+
     const pid_t pid = fork();
     if (pid == 0) {
       // Its own process group, so stop() reaches its children too
@@ -434,6 +503,10 @@ private:
       if (!cwd.empty() && chdir(cwd.c_str()) != 0)
         err = errno;
       else {
+        // execvp() looks for the program in the PATH of this
+        // environment
+        if (!envp.empty())
+          environ = envp.data();
         execvp(argv[0], argv.data());
         err = errno;
       }
@@ -687,12 +760,34 @@ int Process_new(lua_State* L)
     cwd = lua_tostring(L, -1);
   lua_pop(L, 1);
 
+  std::map<std::string, std::optional<std::string>> env;
+  if (lua_getfield(L, 1, "env") == LUA_TTABLE) {
+    lua_pushnil(L);
+    while (lua_next(L, -2)) {
+      // lua_tostring() would turn a number key into a string in place
+      if (lua_type(L, -2) != LUA_TSTRING)
+        return luaL_error(L, "every name in 'env' must be a string");
+      const std::string name = lua_tostring(L, -2);
+      if (name.empty() || name.find('=') != std::string::npos)
+        return luaL_error(L, "'%s' cannot be the name of a variable", name.c_str());
+      if (lua_type(L, -1) == LUA_TSTRING)
+        env[name] = std::string(lua_tostring(L, -1));
+      else if (lua_type(L, -1) == LUA_TBOOLEAN && !lua_toboolean(L, -1))
+        env[name] = std::nullopt;
+      else
+        return luaL_error(L, "the value of '%s' in 'env' must be a string or false", name.c_str());
+      lua_pop(L, 1);
+    }
+  }
+  lua_pop(L, 1);
+
   auto process = push_new<Process>(L);
   lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
   process->L = lua_tothread(L, -1);
   lua_pop(L, 1);
   process->cmd = std::move(cmd);
   process->cwd = std::move(cwd);
+  process->env = std::move(env);
 
   // The callbacks live in the uservalue of the object
   lua_newtable(L);

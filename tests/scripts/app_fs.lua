@@ -83,3 +83,44 @@ do
   assert(not fs.isDirectory("_tmp/a"))
   assert(not fs.isDirectory("_tmp"))
 end
+
+-- Remove a folder with what it holds, without following its links
+do
+  assert(app.forkApiVersion >= 4)
+  assert(fs.makeAllDirectories("_tmp_tree/a/b"))
+  assert(fs.makeAllDirectories("_tmp_outside"))
+  local function write(fn) local f = io.open(fn, "w") f:write("x") f:close() end
+  write("_tmp_tree/a/b/file")
+  write("_tmp_outside/kept")
+  if not app.os.windows then
+    assert(os.execute("ln -s ../_tmp_outside _tmp_tree/a/link"))
+    assert(os.execute("ln -s ../_tmp_outside/kept _tmp_tree/filelink"))
+  end
+  assert(fs.removeTree("_tmp_tree"))
+  assert(not fs.isDirectory("_tmp_tree"))
+  assert(fs.isFile("_tmp_outside/kept"))
+  -- What isn't there is removed already; a file is no folder
+  assert(fs.removeTree("_tmp_tree"))
+  assert(not fs.removeTree("_tmp_outside/kept"))
+  assert(fs.isFile("_tmp_outside/kept"))
+  if not app.os.windows then
+    -- A path to a link that ends in a separator or a dot names the
+    -- link, never the folder it points to
+    assert(os.execute("ln -s _tmp_outside _tmp_link"))
+    for _, path in ipairs{ "_tmp_link/", "_tmp_link//", "_tmp_link/." } do
+      assert(not fs.removeTree(path), path)
+      assert(fs.isFile("_tmp_outside/kept"), path)
+    end
+    assert(os.execute("rm _tmp_link"))
+    -- A folder that can't be looked at isn't removed
+    assert(fs.makeAllDirectories("_tmp_locked/sub"))
+    assert(os.execute("chmod 000 _tmp_locked"))
+    if not os.execute("ls _tmp_locked/sub >/dev/null 2>&1") then
+      assert(not fs.removeTree("_tmp_locked/sub"))
+    end
+    assert(os.execute("chmod 755 _tmp_locked"))
+    assert(fs.removeTree("_tmp_locked"))
+  end
+  os.remove("_tmp_outside/kept")
+  assert(fs.removeDirectory("_tmp_outside"))
+end

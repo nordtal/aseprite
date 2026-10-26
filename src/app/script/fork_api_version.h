@@ -14,6 +14,9 @@
 //
 // 1: Process, app.fs.chooseFolder(), Dialog:tree{} and Dialog:modifyNode{}
 // 2: Dialog{ tab=true, closable } and Dialog:editor{ sprite, onchange }
-#define FORK_API_VERSION 2
+// 3: Process{ env }
+// 4: app.fs.removeTree(), require() in a trusted chunk of a file and
+//    plugin.require() of the season plugin
+#define FORK_API_VERSION 4
 
 #endif

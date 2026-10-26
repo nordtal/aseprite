@@ -15,6 +15,7 @@
 #include "app/console.h"
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
+#include "app/script/trust.h"
 #include "app/ui/app_menuitem.h"
 #include "base/version.h"
 
@@ -139,6 +140,21 @@ int Plugin_gc(lua_State* L)
 {
   get_obj<Plugin>(L, 1)->~Plugin();
   return 0;
+}
+
+// The chunk of a Lua file, trusted like the scripts that come with
+// the app, and the environment of its own it runs in (see trust.h).
+// Only a trusted call loads one.
+int Plugin_loadTrusted(lua_State* L)
+{
+  get_obj<Plugin>(L, 1);
+  const char* filename = luaL_checkstring(L, 2);
+  if (!is_trusted_call(L))
+    return luaL_error(L, "only a script that comes with the app can load a trusted file");
+  if (luaL_loadfilex(L, filename, "t") != LUA_OK)
+    return lua_error(L);
+  trust_chunk(L, -1);
+  return 2;
 }
 
 int Plugin_newCommand(lua_State* L)
@@ -461,6 +477,7 @@ int Plugin_set_preferences(lua_State* L)
 
 const luaL_Reg Plugin_methods[] = {
   { "__gc",             Plugin_gc               },
+  { "loadTrusted",      Plugin_loadTrusted      },
   { "newCommand",       Plugin_newCommand       },
   { "deleteCommand",    Plugin_deleteCommand    },
   { "newMenuGroup",     Plugin_newMenuGroup     },

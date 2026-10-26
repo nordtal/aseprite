@@ -10,6 +10,7 @@
 #pragma once
 
 #include "app/i18n/lang_info.h"
+#include "base/paths.h"
 #include "obs/signal.h"
 #include "render/dithering_matrix.h"
 
@@ -121,6 +122,7 @@ public:
   const std::string& version() const { return m_version; }
   const std::string& displayName() const { return m_displayName; }
   Category category() const { return m_category; }
+  bool isBuiltinExtension() const { return m_isBuiltinExtension; }
 
   const ExtensionItems& keys() const { return m_keys; }
   const Languages& languages() const { return m_languages; }
@@ -259,6 +261,18 @@ private:
   List m_extensions;
   std::string m_userExtensionsPath;
 };
+
+// A name of an extension that is one folder inside the extensions
+// folder: no path separator and no ".."
+bool is_valid_extension_name(const std::string& name);
+
+// A file of an extension archive that lands inside the extension's
+// folder: relative and without ".."
+bool is_safe_archive_entry(const std::string& filename);
+
+// Unpacks the archive of an extension into info.dstPath and returns
+// the files it wrote, relative to that folder.
+base::paths extract_extension_archive(const std::string& zipFn, const ExtensionInfo& info);
 
 } // namespace app
 

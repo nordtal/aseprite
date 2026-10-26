@@ -15,6 +15,8 @@
 #include "app/script/security.h"
 #include "base/fs.h"
 
+#include <filesystem>
+
 namespace app { namespace script {
 
 namespace {
@@ -184,6 +186,39 @@ int AppFS_removeDirectory(lua_State* L)
   return 1;
 }
 
+// app.fs.removeTree(path) removes a folder and everything in it. A
+// link in it is removed itself, never what it points to. True if
+// there is no folder left; a file is no folder and stays, and so does
+// a folder that can't be looked at.
+int AppFS_removeTree(lua_State* L)
+{
+  namespace fs = std::filesystem;
+  const char* path = luaL_checkstring(L, 1);
+  // A trailing separator or dot would make the system follow a link
+  // that the path names, so they go, and a path that ends in ".." is
+  // never removed
+  fs::path p = fs::u8path(path);
+  while ((!p.has_filename() || p.filename() == ".") && p.has_relative_path())
+    p = p.parent_path();
+  if (p.filename() == "..") {
+    lua_pushboolean(L, false);
+    return 1;
+  }
+  std::error_code ec;
+  const fs::file_status status = fs::symlink_status(p, ec);
+  if (status.type() != fs::file_type::directory) {
+    lua_pushboolean(L, status.type() == fs::file_type::not_found);
+    return 1;
+  }
+
+  if (!ask_access(L, path, FileAccessMode::Write, ResourceType::File))
+    return luaL_error(L, "the script doesn't have access to remove the directory '%s'", path);
+
+  fs::remove_all(p, ec);
+  lua_pushboolean(L, fs::symlink_status(p, ec).type() == fs::file_type::not_found);
+  return 1;
+}
+
 // app.fs.chooseFolder{ title, path } shows the system's folder chooser
 // and returns the chosen folder, or nil
 int AppFS_chooseFolder(lua_State* L)
@@ -235,6 +270,7 @@ const luaL_Reg AppFS_methods[] = {
   { "makeDirectory",      AppFS_makeDirectory                               },
   { "makeAllDirectories", AppFS_makeAllDirectories                          },
   { "removeDirectory",    AppFS_removeDirectory                             },
+  { "removeTree",         AppFS_removeTree                                  },
   // Dialogs
   { "chooseFolder",       AppFS_chooseFolder                                },
   { nullptr,              nullptr                                           }

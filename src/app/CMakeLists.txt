@@ -236,6 +236,7 @@ if(ENABLE_SCRIPTING)
     script/require.cpp
     script/script_input_chain.cpp
     script/security.cpp
+    script/trust.cpp
     script/selection_class.cpp
     script/site_class.cpp
     script/size_class.cpp
