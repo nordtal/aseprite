@@ -33,14 +33,15 @@ TEST(BreakLines, APathBreaksAfterTheLastSlashOrSpaceThatFits)
 
 TEST(BreakLines, APartWithoutABreakBreaksAtTheWidth)
 {
-  EXPECT_EQ((std::vector<std::string>{ "127.0.0.1:", "29415" }), break_lines("127.0.0.1:29415", 10, bytes));
+  EXPECT_EQ((std::vector<std::string>{ "127.0.0.1:", "29415" }),
+            break_lines("127.0.0.1:29415", 10, bytes));
 }
 
 TEST(BreakLines, ACharacterIsNeverSplit)
 {
-  // "\xC3\xBC" is one character of two bytes: "ab" and its first byte
+  // "\303\274" is one character of two bytes: "ab" and its first byte
   // would fit
-  EXPECT_EQ((std::vector<std::string>{ "ab", "\xC3\xBC" "c" }), break_lines("ab\xC3\xBC" "c", 3, bytes));
+  EXPECT_EQ((std::vector<std::string>{ "ab", "\303\274c" }), break_lines("ab\303\274c", 3, bytes));
 }
 
 TEST(BreakLines, ACharacterWiderThanTheWidthIsALineOfItsOwn)

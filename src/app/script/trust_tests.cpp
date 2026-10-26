@@ -62,10 +62,9 @@ int fake_process_new(lua_State* L)
 // the resource without asking
 int access(lua_State* L)
 {
-  lua_pushboolean(L,
-                  is_trusted_access(L,
-                                    FileAccessMode(luaL_checkinteger(L, 1)),
-                                    luaL_checkstring(L, 2)));
+  lua_pushboolean(
+    L,
+    is_trusted_access(L, FileAccessMode(luaL_checkinteger(L, 1)), luaL_checkstring(L, 2)));
   return 1;
 }
 
@@ -198,7 +197,8 @@ TEST_F(Trust, TheTrustedChunkAndItsFunctionsAreTrusted)
 
 TEST_F(Trust, ATrustedCallReadsWritesAndRunsWithoutAsking)
 {
-  for (FileAccessMode mode : { FileAccessMode::Read, FileAccessMode::Write, FileAccessMode::Execute })
+  for (FileAccessMode mode :
+       { FileAccessMode::Read, FileAccessMode::Write, FileAccessMode::Execute })
     EXPECT_TRUE(trustedAccess(mode, "/anywhere")) << int(mode);
   EXPECT_FALSE(trustedAccess(FileAccessMode::LoadLib, "/anywhere"));
 }
@@ -206,8 +206,10 @@ TEST_F(Trust, ATrustedCallReadsWritesAndRunsWithoutAsking)
 #ifdef ENABLE_WEBSOCKET
 TEST_F(Trust, ATrustedCallOpensAWebSocketToTheLoopbackHostOnlyWithoutAsking)
 {
-  for (const char* url :
-       { "ws://127.0.0.1:4711", "ws://127.0.0.1:4711/bridge?x=1", "ws://localhost:4711", "ws://localhost" })
+  for (const char* url : { "ws://127.0.0.1:4711",
+                           "ws://127.0.0.1:4711/bridge?x=1",
+                           "ws://localhost:4711",
+                           "ws://localhost" })
     EXPECT_TRUE(trustedAccess(FileAccessMode::OpenSocket, url)) << url;
 
   for (const char* url : { "ws://example.com:4711",
