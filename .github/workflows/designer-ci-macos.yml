@@ -1,0 +1,50 @@
+name: designer-ci-macos
+# macOS minutes count ten times against the private minutes, so this runs
+# only the settings import tests, which skip a case-insensitive target on
+# the case-sensitive Linux runner, and only when what they cover changes.
+on:
+  push:
+    branches: [main]
+    paths:
+    - src/app/settings_import*
+    - .github/workflows/designer-ci-macos.yml
+  pull_request:
+    paths:
+    - src/app/settings_import*
+    - .github/workflows/designer-ci-macos.yml
+  workflow_dispatch:
+concurrency:
+  group: designer-ci-macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  settings-import:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        submodules: recursive
+    - name: Install Skia
+      run: |
+        skia_url=$(bash laf/misc/skia-url.sh release macos arm64 | xargs)
+        curl -L -o skia.zip "$skia_url"
+        unzip -q skia.zip -d skia
+    - uses: aseprite/get-ninja@27788a2a3a1d6106713702d6741e4ee95f3cc10a # main
+    - uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+      with:
+        key: designer-ci-macos
+    - name: Configure
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DENABLE_CCACHE=on \
+          -DENABLE_TESTS=on \
+          -DLAF_BACKEND=skia \
+          -DSKIA_DIR=$PWD/skia \
+          -DSKIA_LIBRARY_DIR=$PWD/skia/out/Release-arm64
+    - name: Build
+      run: ninja -C build settings_import_tests
+    - name: Settings import tests
+      run: build/bin/settings_import_tests
