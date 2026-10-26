@@ -23,11 +23,15 @@
 #include "base/fs.h"
 #include "base/sha1.h"
 #include "fmt/format.h"
+#include "ui/link_label.h"
+#include "ui/manager.h"
+#include "ui/scale.h"
 #include "ui/widget_type.h"
 
 #include "script_access.xml.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -35,6 +39,9 @@
 namespace app { namespace script {
 
 namespace {
+
+// The space the alert keeps from each side of the window, in points
+const int kAlertMargin = 8;
 
 int secure_io_open(lua_State* L);
 int secure_io_popen(lua_State* L);
@@ -493,12 +500,9 @@ bool ask_access(lua_State* L,
       return false;
     }
 
-    // A script that comes with the app reads, writes and runs
-    // programs like the app itself, as long as no other script is
+    // A script that comes with the app, as long as no other script is
     // part of the call
-    if ((mode == FileAccessMode::Read || mode == FileAccessMode::Write ||
-         mode == FileAccessMode::Execute) &&
-        is_trusted_call(L))
+    if (is_trusted_access(L, mode, filename))
       return true;
 
     const char* section = "script_access";
@@ -573,7 +577,7 @@ bool ask_access(lua_State* L,
       dlg.script()->initTheme();
     }
     else
-      dlg.script()->Click.connect([&dlg] { app::launcher::open_folder(dlg.script()->text()); });
+      dlg.script()->Click.connect([&script] { app::launcher::open_folder(script); });
 
     dlg.full()->Click.connect([&dlg, &allowButtonText]() {
       if (dlg.full()->isSelected()) {
@@ -592,13 +596,35 @@ bool ask_access(lua_State* L,
     });
 
     if (resourceType == ResourceType::File) {
-      dlg.file()->Click.connect([&dlg] {
-        std::string fn = dlg.file()->text();
+      const std::string fn = dlg.file()->text();
+      dlg.file()->Click.connect([fn] {
         if (base::is_file(fn))
           app::launcher::open_folder(fn);
         else
           app::launcher::open_folder(base::get_file_path(fn));
       });
+    }
+
+    // A long script name or resource breaks into lines, so the alert
+    // fits within the window
+    const int room = ui::Manager::getDefault()->bounds().w - 2 * kAlertMargin * ui::guiscale();
+    const int excess = dlg.sizeHint().w - room;
+    if (excess > 0) {
+      int widest = 0;
+      for (ui::LinkLabel* link : { dlg.script(), dlg.file() })
+        widest = std::max(widest, link->textWidth());
+      for (ui::LinkLabel* link : { dlg.script(), dlg.file() }) {
+        const std::vector<std::string> lines = break_lines(
+          link->text(),
+          std::max(1, widest - excess),
+          [link](const std::string& s) { return int(std::ceil(link->font()->textLength(s))); });
+        link->setText(lines[0]);
+        for (size_t i = 1; i < lines.size(); ++i) {
+          auto line = new ui::LinkLabel("", lines[i]);
+          line->Click.connect([link] { link->Click(); });
+          link->parent()->addChild(line);
+        }
+      }
     }
 
     dlg.openWindowInForeground();
@@ -617,6 +643,38 @@ bool ask_access(lua_State* L,
       return false;
   }
   return true;
+}
+
+std::vector<std::string> break_lines(const std::string& text,
+                                     int width,
+                                     const std::function<int(const std::string&)>& measure)
+{
+  // The end of the UTF-8 character that starts at i
+  auto next = [](const std::string& s, size_t i) {
+    ++i;
+    while (i < s.size() && (s[i] & 0xC0) == 0x80)
+      ++i;
+    return i;
+  };
+
+  std::vector<std::string> lines;
+  std::string rest = text;
+  while (!rest.empty() && measure(rest) > width) {
+    size_t fit = next(rest, 0);
+    size_t brk = 0;
+    for (size_t end = fit; end < rest.size() && measure(rest.substr(0, end)) <= width;
+         end = next(rest, end)) {
+      fit = end;
+      if (rest[end - 1] == '/' || rest[end - 1] == ' ')
+        brk = end;
+    }
+    const size_t cut = (brk ? brk : fit);
+    lines.push_back(rest.substr(0, cut));
+    rest.erase(0, cut);
+  }
+  if (!rest.empty() || lines.empty())
+    lines.push_back(rest);
+  return lines;
 }
 
 lua_CFunction get_original_io_open()

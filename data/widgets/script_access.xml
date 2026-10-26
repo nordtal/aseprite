@@ -4,9 +4,9 @@
 <window id="script_access" text="@.title">
   <vbox>
     <label text="@.script_label" />
-    <hbox border="4"><link id="script" /></hbox>
+    <vbox border="4" childspacing="0"><link id="script" /></vbox>
     <label id="file_label" />
-    <hbox id="file_container" border="4"><link id="file" /></hbox>
+    <vbox id="file_container" border="4" childspacing="0"><link id="file" /></vbox>
     <separator horizontal="true" />
     <check id="dont_show" text="@.dont_show_for_this_access" />
     <check id="full" text="@.dont_show_for_this_script" />
