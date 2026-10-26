@@ -258,7 +258,7 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
 
       fit_bounds(mainDisplay, this, defaultBounds);
 
-      load_window_pos(this, "MiniEditor", false);
+      load_window_pos(this, "PreviewWindow", false);
       invalidate();
       break;
     }
@@ -269,7 +269,7 @@ bool PreviewEditorWindow::onProcessMessage(ui::Message* msg)
       if (ownDisplay())
         loadNativeFrame(display()->nativeWindow()->frame());
       if (preview_place_changed(m_openBounds, m_openFrame, bounds(), lastNativeFrame()))
-        save_window_pos(this, "MiniEditor");
+        save_window_pos(this, "PreviewWindow");
       break;
   }
 
