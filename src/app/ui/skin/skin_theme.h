@@ -52,6 +52,10 @@ class SkinTheme final : public ui::Theme,
 public:
   static const char* kThemesFolderName;
 
+  // The gap between an entry's frame and its text on each side, in
+  // points
+  static constexpr int kEntryTextGap = 2;
+
   static SkinTheme* instance();
   static SkinTheme* get(const ui::Widget* widget);
 

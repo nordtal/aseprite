@@ -86,6 +86,9 @@ public:
     , m_doc(site.document())
     , m_extraCel(new ExtraCel)
   {
+    // The Entry constructor ran Entry::onInitTheme() only
+    initTheme();
+
     // We have to draw the editor as background of this ui::Entry.
     setTransparent(true);
 
@@ -178,6 +181,15 @@ private:
   {
     Entry::onInitTheme(ev);
     setBgColor(gfx::ColorNone);
+
+    // This entry paints no frame, and the caret that a click places
+    // depends on its border, so it drops the gap the theme leaves
+    // between a frame and the text
+    const int gap = skin::SkinTheme::kEntryTextGap * guiscale();
+    gfx::Border b = border();
+    b.left(b.left() - gap);
+    b.right(b.right() - gap);
+    setBorder(b);
   }
 
   void onSetText() override
