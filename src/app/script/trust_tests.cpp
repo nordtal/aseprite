@@ -313,3 +313,117 @@ TEST_F(Trust, AScriptGetsNoFunctionOfTheStack)
                   "return a.func == nil and a.source ~= nil and b.func == nil"));
   EXPECT_TRUE(run("return debug.getinfo(print, 'f').func == print"));
 }
+
+TEST_F(Trust, ATrustedFileLoadedAgainReplacesItsEarlierChunk)
+{
+  const auto load = [this] {
+    ASSERT_EQ(LUA_OK, luaL_loadfilex(L, m_file.c_str(), "t"));
+    trust_chunk(L, -1);
+    lua_pop(L, 2);
+  };
+  load();
+  lua_gc(L, LUA_GCCOLLECT);
+  const int before = lua_gc(L, LUA_GCCOUNT);
+  for (int i = 0; i < 100; ++i)
+    load();
+  lua_gc(L, LUA_GCCOLLECT);
+  EXPECT_LT(lua_gc(L, LUA_GCCOUNT) - before, 64) << "KiB kept by 100 loads";
+
+  // The functions of the chunks it replaced aren't trusted any more
+  lua_getglobal(L, "direct");
+  ASSERT_EQ(LUA_OK, lua_pcall(L, 0, 1, 0));
+  EXPECT_FALSE(lua_toboolean(L, -1));
+  lua_pop(L, 1);
+}
+
+namespace {
+
+// A plugin folder with modules, next to a file outside it
+class TrustedModules : public ::testing::Test {
+protected:
+  void SetUp() override
+  {
+    namespace fs = std::filesystem;
+    m_root = fs::temp_directory_path() / "trust_tests_modules";
+    fs::remove_all(m_root);
+    const fs::path plugin = m_root / "plugin";
+    fs::create_directories(plugin / "sub");
+    std::ofstream(m_root / "outside.lua") << "Process{ '/outside' }:start()\n";
+    std::ofstream(plugin / "sub" / "mod.lua")
+      << "loads = (loads or 0) + 1\n"
+         "Process{ '/module' }:start()\n"
+         "return { name=... }\n";
+    fs::create_symlink(m_root / "outside.lua", plugin / "link.lua");
+    std::ofstream(plugin / "init.lua")
+      << "mod = require('sub.mod')\n"
+         "again = require('sub.mod')\n"
+         "refused = {}\n"
+         "for _, name in ipairs{ '../outside', '..', '.outside', 'sub..mod', 'sub/mod',\n"
+         "                       '/outside', '', 'link', 'missing', 'sub.mod.lua' } do\n"
+         "  local ok, err = pcall(require, name)\n"
+         "  refused[name] = not ok and type(err) == 'string'\n"
+         "end\n";
+
+    L = luaL_newstate();
+    luaL_openlibs(L);
+    register_app_like_globals(L);
+    g_starts.clear();
+    prepare_trust(L);
+    const std::string init = (plugin / "init.lua").string();
+    ASSERT_EQ(LUA_OK, luaL_loadfilex(L, init.c_str(), "t"));
+    trust_chunk(L, -1);
+    lua_insert(L, -2);
+    ASSERT_EQ(LUA_OK, lua_pcall(L, 0, 0, 0)) << lua_tostring(L, -1);
+    m_env = lua_gettop(L);
+  }
+
+  void TearDown() override
+  {
+    lua_close(L);
+    std::filesystem::remove_all(m_root);
+  }
+
+  lua_State* L = nullptr;
+  std::filesystem::path m_root;
+  int m_env = 0;
+};
+
+} // anonymous namespace
+
+TEST_F(TrustedModules, AModuleOfThePluginRunsTrustedInItsEnvironmentOnce)
+{
+  ASSERT_EQ(1u, g_starts.size());
+  EXPECT_EQ("/module", g_starts[0].program);
+  EXPECT_TRUE(g_starts[0].trusted);
+
+  lua_getfield(L, m_env, "loads");
+  EXPECT_EQ(1, lua_tointeger(L, -1));
+  lua_getfield(L, m_env, "mod");
+  lua_getfield(L, m_env, "again");
+  EXPECT_TRUE(lua_istable(L, -1) && lua_rawequal(L, -1, -2));
+  lua_getfield(L, -1, "name");
+  EXPECT_STREQ("sub.mod", lua_tostring(L, -1));
+  lua_pop(L, 4);
+}
+
+TEST_F(TrustedModules, ANameOutsideThePluginFolderIsRefused)
+{
+  lua_getfield(L, m_env, "refused");
+  for (const char* name : { "../outside", "..", ".outside", "sub..mod", "sub/mod", "/outside", "",
+                            "link", "missing", "sub.mod.lua" }) {
+    lua_getfield(L, -1, name);
+    EXPECT_TRUE(lua_toboolean(L, -1)) << name;
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+  for (const auto& start : g_starts)
+    EXPECT_NE("/outside", start.program);
+}
+
+TEST_F(TrustedModules, AnUntrustedCallCantRequireAModule)
+{
+  lua_getfield(L, m_env, "require");
+  lua_pushstring(L, "sub.mod");
+  EXPECT_NE(LUA_OK, lua_pcall(L, 1, 1, 0));
+  lua_pop(L, 1);
+}

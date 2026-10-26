@@ -15,16 +15,21 @@
 #include "lualib.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 
 namespace app { namespace script {
 
 namespace {
 
-// The registry table of trusted prototypes (light userdata keys) and
-// of the trusted chunks, which keep their prototypes alive so no other
-// prototype takes their address
+// The registry table of trusted prototypes (light userdata keys)
 const char kTrusted = 0;
+
+// The registry table of the trusted chunks by their source. Each keeps
+// its prototypes alive, so no other prototype takes their address
+// while they're trusted. A chunk from the same source replaces it, and
+// its prototypes stop being trusted before it's let go.
+const char kChunks = 0;
 
 // The registry table with the copy of the globals that prepare_trust()
 // makes
@@ -46,12 +51,17 @@ void push_trusted(lua_State* L)
   }
 }
 
-void trust_proto(lua_State* L, const Proto* p)
+// Trusts p and the prototypes in it, or stops trusting them, in the
+// table on top of the stack
+void trust_proto(lua_State* L, const Proto* p, bool trusted = true)
 {
-  lua_pushboolean(L, true);
+  if (trusted)
+    lua_pushboolean(L, true);
+  else
+    lua_pushnil(L);
   lua_rawsetp(L, -2, p);
   for (int i = 0; i < p->sizep; ++i)
-    trust_proto(L, p->p[i]);
+    trust_proto(L, p->p[i], trusted);
 }
 
 const Proto* proto_of(lua_State* L, int idx)
@@ -87,7 +97,7 @@ int getinfo_without_functions(lua_State* L)
 
 int no_require(lua_State* L)
 {
-  return luaL_error(L, "a trusted script loads its files with plugin:loadTrusted()");
+  return luaL_error(L, "a trusted chunk that isn't a file has no modules");
 }
 
 void copy_fields(lua_State* L, int from, int to, int memo);
@@ -210,6 +220,116 @@ void prepare_trust(lua_State* L)
   lua_pop(L, 1);
 }
 
+namespace {
+
+// Trusts the chunk at idx in place of the earlier one from its source,
+// with the environment at env
+void trust(lua_State* L, int idx, int env)
+{
+  idx = lua_absindex(L, idx);
+  env = lua_absindex(L, env);
+  const Proto* p = proto_of(L, idx);
+  lua_pushvalue(L, env);
+  lua_setupvalue(L, idx, 1);
+
+  if (lua_rawgetp(L, LUA_REGISTRYINDEX, &kChunks) != LUA_TTABLE) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &kChunks);
+  }
+  const int chunks = lua_gettop(L);
+  const char* source = (p->source ? getstr(p->source) : "=?");
+  push_trusted(L);
+  if (const Proto* earlier = (lua_getfield(L, chunks, source) == LUA_TFUNCTION ?
+                                proto_of(L, -1) :
+                                nullptr)) {
+    lua_pop(L, 1);
+    trust_proto(L, earlier, false);
+  }
+  else {
+    lua_pop(L, 1);
+  }
+  trust_proto(L, p);
+  lua_pushvalue(L, idx);
+  lua_setfield(L, chunks, source);
+  lua_settop(L, chunks - 1);
+}
+
+// The file of the module name inside folder: the parts of the name
+// between its dots are folders, the last one a .lua file, and the
+// file, links followed, must lie inside the folder
+bool module_file(const std::string& folder, const std::string& name, std::string& file)
+{
+  namespace fs = std::filesystem;
+  fs::path path = fs::u8path(folder);
+  size_t begin = 0;
+  while (true) {
+    const size_t end = std::min(name.find('.', begin), name.size());
+    const std::string part = name.substr(begin, end - begin);
+    if (part.empty() || part.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+                                               "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                               "0123456789_-") != std::string::npos)
+      return false;
+    if (end == name.size()) {
+      path /= fs::u8path(part + ".lua");
+      break;
+    }
+    path /= fs::u8path(part);
+    begin = end + 1;
+  }
+
+  std::error_code ec;
+  const fs::path root = fs::canonical(fs::u8path(folder), ec);
+  if (ec)
+    return false;
+  const fs::path real = fs::canonical(path, ec);
+  if (ec || !fs::is_regular_file(real, ec))
+    return false;
+  auto r = root.begin();
+  auto f = real.begin();
+  for (; r != root.end(); ++r, ++f) {
+    if (f == real.end() || *r != *f)
+      return false;
+  }
+  file = real.u8string();
+  return true;
+}
+
+// require(name) of a trusted chunk: loads the module name from the
+// chunk's folder (see module_file()) once, as a trusted text chunk in
+// the chunk's environment, and returns what it returns. The upvalues
+// are the folder, the environment and the loaded modules.
+int trusted_require(lua_State* L)
+{
+  const std::string name = luaL_checkstring(L, 1);
+  if (!is_trusted_call(L))
+    return luaL_error(L, "only a script that comes with the app can require a trusted module");
+  lua_settop(L, 1);
+  if (lua_getfield(L, lua_upvalueindex(3), name.c_str()) != LUA_TNIL)
+    return 1;
+  lua_pop(L, 1);
+
+  const char* folder = lua_tostring(L, lua_upvalueindex(1));
+  std::string file;
+  if (!module_file(folder, name, file))
+    return luaL_error(L, "there is no module '%s' in %s", name.c_str(), folder);
+  if (luaL_loadfilex(L, file.c_str(), "t") != LUA_OK)
+    return lua_error(L);
+  trust(L, -1, lua_upvalueindex(2));
+  lua_pushvalue(L, 1);
+  lua_call(L, 1, 1);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_pushboolean(L, true);
+  }
+  lua_pushvalue(L, -1);
+  lua_setfield(L, lua_upvalueindex(3), name.c_str());
+  return 1;
+}
+
+} // anonymous namespace
+
 void trust_chunk(lua_State* L, int idx)
 {
   idx = lua_absindex(L, idx);
@@ -223,16 +343,20 @@ void trust_chunk(lua_State* L, int idx)
   }
   push_copy(L, -1);
   lua_remove(L, -2);
-  lua_pushvalue(L, -1);
-  lua_setupvalue(L, idx, 1);
   const int env = lua_gettop(L);
-  push_trusted(L);
-  trust_proto(L, p);
-  lua_pushvalue(L, idx);
-  lua_pushboolean(L, true);
-  lua_rawset(L, -3);
-  lua_pop(L, 1);
-  lua_settop(L, env);
+
+  // The chunk of a file gets the modules of its folder
+  const std::string source = (p->source ? getstr(p->source) : "");
+  const size_t slash = source.find_last_of("/\\");
+  if (source[0] == '@' && slash != std::string::npos) {
+    lua_pushlstring(L, source.c_str() + 1, slash - 1);
+    lua_pushvalue(L, env);
+    lua_newtable(L);
+    lua_pushcclosure(L, trusted_require, 3);
+    lua_setfield(L, env, "require");
+  }
+
+  trust(L, idx, env);
 }
 
 bool is_trusted_call(lua_State* L)

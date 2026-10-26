@@ -385,7 +385,9 @@ end
 
 -- Loads designer/init.lua from the clone like a script of an
 -- extension, trusted like this file and in an environment of its own:
--- it defines init(plugin) and exit(plugin) there. Its plugin object
+-- it defines init(plugin) and exit(plugin) there, and require(name)
+-- or plugin.require(name) loads designer/<name>.lua, dots for folders,
+-- into that environment, once. Its plugin object
 -- is the bootstrap's with the designer folder as path and with the
 -- bootstrap's context. Returns the exit function, or nil and the
 -- reason.
@@ -411,6 +413,9 @@ function season.loadPlugin(clone, plugin, context)
   if not ok then
     return nil, chunk
   end
+  -- plugin.require(name) loads a module of the designer folder into
+  -- the plugin's environment, like require() there
+  proxy.require = env.require
   local msg
   ok, msg = pcall(chunk)
   if not ok then

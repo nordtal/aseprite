@@ -216,7 +216,7 @@ do
   local probe = {}
   local plugin = { preferences={ cloneRoot="x" },
                    loadTrusted=function(_, fn)
-                     local env = setmetatable({ probe=probe }, { __index=_G })
+                     local env = setmetatable({ probe=probe, require=probe }, { __index=_G })
                      return assert(loadfile(fn, "t", env)), env
                    end }
   local exitPlugin, msg = season.loadPlugin(dir, plugin, { clone=dir })
@@ -225,7 +225,7 @@ do
 
   write(app.fs.joinPath(dir, "designer", "init.lua"), [[
 function init(plugin)
-  probe.path, probe.clone = plugin.path, plugin.bootstrap.clone
+  probe.path, probe.clone, probe.require = plugin.path, plugin.bootstrap.clone, plugin.require
   plugin.preferences.n = 1
 end
 function exit(plugin) probe.exit = true end
@@ -233,6 +233,7 @@ function exit(plugin) probe.exit = true end
   exitPlugin = season.loadPlugin(dir, plugin, { clone=dir })
   assert(probe.path == app.fs.joinPath(dir, "designer"))
   assert(probe.clone == dir)
+  assert(probe.require == probe, "plugin.require is the require() of its environment")
   assert(plugin.preferences.plugin.n == 1)
   assert(plugin.preferences.cloneRoot == "x")
   assert(init == nil and exit == nil)

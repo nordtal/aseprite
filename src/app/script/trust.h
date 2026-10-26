@@ -30,9 +30,15 @@ void prepare_trust(lua_State* L);
 
 // Trusts the chunk at index idx and every function defined in it,
 // gives it an environment of its own made from the globals that
-// prepare_trust() copied, and pushes that environment. It holds no
-// require(): a trusted chunk loads its files with plugin:loadTrusted().
-// The chunk stays alive with the Lua state.
+// prepare_trust() copied, and pushes that environment. The chunk stays
+// alive until a chunk from the same source replaces it; then its
+// functions aren't trusted any more.
+//
+// A chunk of a file gets require(name) in its environment: it loads
+// <name>.lua from the file's folder, the dots of the name as folders,
+// once, and only if the file, links followed, lies inside that folder.
+// The module runs trusted in the same environment, as a text chunk;
+// only a trusted call can require one.
 void trust_chunk(lua_State* L, int idx);
 
 // True when the call runs on the main thread and every Lua function
