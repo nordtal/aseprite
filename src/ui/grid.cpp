@@ -466,10 +466,12 @@ void Grid::distributeStripSize(std::vector<Strip>& colstrip,
       ((extra_total > 0 && (max_expand_count > 0 || same_width)) || (extra_total < 0))) {
     // If a expandable column-strip was empty (size=0) then we have
     // to reduce the extra_total size because a new child-spacing is
-    // added by this column
+    // added by this column, unless it's the first strip with a size
+    // (j counts the strips that have one)
     for (i = 0; i < (int)colstrip.size(); ++i) {
       if ((colstrip[i].size == 0) && (colstrip[i].expand_count == max_expand_count || same_width)) {
-        extra_total -= SGN(extra_total) * (this->childSpacing() + gap);
+        if (j++ > 0)
+          extra_total -= SGN(extra_total) * (this->childSpacing() + gap);
       }
     }
 

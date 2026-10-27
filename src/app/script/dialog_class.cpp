@@ -172,7 +172,8 @@ struct Dialog {
   bool closedAtExit = false;
 
   // The grid of the side panel of a Dialog{ tab=true }, which holds
-  // the widgets added after Dialog:panel{}.
+  // the widgets added after Dialog:panel{}, or after Dialog:splitter{}
+  // once there's one.
   ui::Grid* panelGrid = nullptr;
 
   Dialog(const ui::Window::Type windowType, const std::string& title, bool sizeable)
@@ -1763,6 +1764,33 @@ int Dialog_panel(lua_State* L)
   return 1;
 }
 
+int Dialog_splitter(lua_State* L)
+{
+  auto dlg = get_obj<Dialog>(L, 1);
+  if (!dlg->panelGrid)
+    return luaL_error(L, "Dialog:splitter{} needs a Dialog:panel{} before it");
+  if (dlg->wipTab)
+    return luaL_error(L, "Dialog:splitter{} can't be between Dialog:tab{} and Dialog:endtabs{}");
+  SidePanel* panel = dlg->tab->sidePanel();
+  if (dlg->panelGrid->parent() != panel)
+    return luaL_error(L, "a side panel has one splitter at most");
+
+  // The widgets from here on go below the splitter
+  auto grid = new ui::Grid(2, false);
+  grid->setExpansive(true);
+  panel->split(dlg->panelGrid, grid);
+  dlg->panelGrid = grid;
+  dlg->currentGrid = grid;
+  dlg->hbox = nullptr;
+
+  if (panel->parent()) {
+    panel->layout();
+    panel->invalidate();
+  }
+  lua_pushvalue(L, 1);
+  return 1;
+}
+
 int Dialog_tab(lua_State* L)
 {
   auto dlg = get_obj<Dialog>(L, 1);
@@ -2215,8 +2243,8 @@ int Dialog_repaint(lua_State* L)
   auto dlg = get_obj<Dialog>(L, 1);
   std::stack<ui::Widget*> widgets;
   widgets.push(dlg->window.grid());
-  if (dlg->panelGrid)
-    widgets.push(dlg->panelGrid);
+  if (dlg->tab && dlg->tab->sidePanel())
+    widgets.push(dlg->tab->sidePanel());
 
   while (!widgets.empty()) {
     auto child = widgets.top();
@@ -2514,6 +2542,7 @@ const luaL_Reg Dialog_methods[] = {
   { "tree",      Dialog_tree      },
   { "editor",    Dialog_editor    },
   { "panel",     Dialog_panel     },
+  { "splitter",  Dialog_splitter  },
   { "tab",       Dialog_tab       },
   { "endtabs",   Dialog_endtabs   },
   { "modify",    Dialog_modify    },

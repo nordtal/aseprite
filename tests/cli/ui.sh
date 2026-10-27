@@ -46,6 +46,8 @@ function run_ui_scripts() {
 }
 
 grant_ui_access ui $t
+# Where the user dragged the splitter of a side panel before
+printf "[layout:side_panel_split]\nside_panel_split_kept = 25\nside_panel_split_top = 0\n" >>$t/aseprite.ini
 run_ui_scripts ui $t
 
 mirrored=$t/mirrored

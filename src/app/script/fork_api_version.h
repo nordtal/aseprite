@@ -37,6 +37,10 @@
 //    the dialog's other ids. Dialog:modify{ id, side, width } of the
 //    panel, and Dialog.bounds of an open tab is the tab's place in the
 //    window while it's active, an empty rectangle while it isn't.
-#define FORK_API_VERSION 6
+// 7: Dialog:splitter{} in a side panel, once at most: the widgets
+//    before it go above a splitter that the user drags, the ones after
+//    it below. It starts at half the panel's height, and the panel
+//    keeps where the user dragged it, as it keeps its width.
+#define FORK_API_VERSION 7
 
 #endif
