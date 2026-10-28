@@ -51,6 +51,14 @@ jobs:
         if (-not (Test-Path "$app\data\extensions\nordtal-bootstrap\tools\gh\bin\gh.exe")) { throw 'no gh' }
         $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nordtal Designer.lnk'
         if (-not (Test-Path $lnk)) { throw 'no start menu entry' }
+    # fetch-tools.sh runs in Git for Windows' bash, which must bring
+    # unzip and sha256sum itself, not find the runner's
+    - name: Check Git's own tools
+      shell: pwsh
+      run: |
+        foreach ($tool in 'unzip.exe', 'sha256sum.exe', 'mktemp.exe') {
+          if (-not (Test-Path "$env:ProgramFiles\Git\usr\bin\$tool")) { throw "Git for Windows has no $tool" }
+        }
     - name: Update
       shell: pwsh
       run: |

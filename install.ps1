@@ -54,9 +54,10 @@
                 [Environment]::GetEnvironmentVariable('Path', 'User')
   }
 
+  # winget.exe by its full name, which this function's name would shadow
   function Winget($id, $override) {
     $more = if ($override) { @('--override', $override) } else { @() }
-    Run winget install --exact --id $id --silent --accept-package-agreements --accept-source-agreements @more
+    Run winget.exe install --exact --id $id --silent --accept-package-agreements --accept-source-agreements @more
     Update-Path
   }
 
@@ -68,8 +69,10 @@
     if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
       Winget Git.Git
     }
-    $gitRoot = Split-Path (Split-Path (Get-Command git.exe).Source)
+    # The bash of Git for Windows, wherever the git.exe on the PATH lives
+    $gitRoot = (Run git.exe --exec-path) -replace '/mingw64/.*$', '' -replace '/', '\'
     $bash = Join-Path $gitRoot 'bin\bash.exe'
+    if (-not (Test-Path $bash)) { throw "Git for Windows has no bash at $bash" }
 
     $step = 'Visual Studio Build Tools'; Write-Host "==> $step"
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -80,7 +83,16 @@
     }
     $vs = Find-VS
     if (-not $vs) {
-      Winget Microsoft.VisualStudio.2022.BuildTools '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+      # A Visual Studio without the C++ workload gets it added, which
+      # winget can't do to an installed package
+      $other = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath }
+      if ($other) {
+        $setup = Start-Process -Verb RunAs -Wait -PassThru (Join-Path (Split-Path $vswhere) 'setup.exe') `
+          "modify --installPath `"$other`" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --norestart"
+        if ($setup.ExitCode -ne 0) { throw "the Visual Studio Installer exited with $($setup.ExitCode)" }
+      } else {
+        Winget Microsoft.VisualStudio.2022.BuildTools '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+      }
       $vs = Find-VS
       if (-not $vs) { throw 'the C++ build tools are not installed' }
     }
@@ -117,7 +129,7 @@
     $step = 'Source'; Write-Host "==> $step"
     if (Test-Path (Join-Path $src '.git')) {
       Run git -C $src fetch --quiet origin $branch
-      Run git -C $src checkout --quiet -B $branch FETCH_HEAD
+      Run git -C $src checkout --quiet --force -B $branch FETCH_HEAD
       Run git -C $src submodule sync --quiet --recursive
       Run git -C $src submodule update --quiet --init --recursive
     } else {
@@ -159,6 +171,8 @@
 
     $step = 'Install'; Write-Host "==> $step"
     $old = "$app.old"
+    # A run stopped mid-swap left the app only as .old
+    if (-not (Test-Path $app) -and (Test-Path $old)) { Rename-Item $old $app }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $old
     # A running app can't be moved, which stops here
     if (Test-Path $app) { Rename-Item $app $old }

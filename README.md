@@ -7,7 +7,7 @@ Each designer builds it from source with one line, since Aseprite's EULA allows 
 for one's own use and this repository publishes no build. The line installs what the build needs,
 fetches this repository, builds the app and installs it. Running it again updates the app.
 
-**macOS**, in Terminal:
+**macOS** with Apple silicon, in Terminal:
 
     curl -fsSL https://raw.githubusercontent.com/nordtal/aseprite/main/install.sh | bash
 
@@ -18,7 +18,8 @@ fetches this repository, builds the app and installs it. Running it again update
 The first run installs the Command Line Tools on macOS, which asks in a window of its own, and the
 Visual Studio Build Tools on Windows, which asks for administrator rights. An update builds only
 what changed. A step that fails says which one it was and leaves the installed app as it was. The
-app lands in `/Applications` on macOS and in the start menu on Windows.
+app lands in `/Applications` on macOS, or `~/Applications` for an account that can't write there,
+and in the start menu on Windows.
 
 # Aseprite
 

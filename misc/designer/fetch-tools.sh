@@ -22,7 +22,12 @@ trap 'rm -rf "$work"' EXIT
 # fetch <url> <sha256> <folder>: unzips the archive into the folder
 fetch() {
   curl -fsSL -o "$work/a.zip" "$1"
-  echo "$2  $work/a.zip" | shasum -a 256 -c - > /dev/null
+  # Git for Windows' bash has sha256sum, macOS has shasum
+  if command -v sha256sum > /dev/null; then
+    echo "$2  $work/a.zip" | sha256sum -c - > /dev/null
+  else
+    echo "$2  $work/a.zip" | shasum -a 256 -c - > /dev/null
+  fi
   rm -rf "$3" "$work/x"
   mkdir -p "$3" "$work/x"
   unzip -q "$work/a.zip" -d "$work/x"
