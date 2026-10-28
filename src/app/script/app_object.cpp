@@ -19,6 +19,7 @@
 #include "app/doc_access.h"
 #include "app/i18n/strings.h"
 #include "app/inline_command_execution.h"
+#include "app/kiosk.h"
 #include "app/loop_tag.h"
 #include "app/modules/palettes.h"
 #include "app/pref/preferences.h"
@@ -28,6 +29,7 @@
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
 #include "app/script/security.h"
+#include "app/script/trust.h"
 #include "app/site.h"
 #include "app/tools/active_tool.h"
 #include "app/tools/ink.h"
@@ -65,18 +67,31 @@ int load_sprite_from_file(lua_State* L, const char* filename, const LoadSpriteFr
   if (!ask_access(L, absFn.c_str(), FileAccessMode::Read, ResourceType::File))
     return luaL_error(L, "script doesn't have access to open file %s", absFn.c_str());
 
+  // In the kiosk only a script that comes with the app opens a sprite;
+  // an image is read by anyone
+  const bool image = (param == LoadSpriteFromFileParam::OneFrameAsImage);
+  if (kiosk::active() && !image && !is_trusted_call(L))
+    return luaL_error(L, "the kiosk opens no sprite for this script");
+
   app::Context* ctx = App::instance()->context();
+  Docs& docs = ctx->documents();
   Doc* oldDoc = ctx->activeDocument();
+  Doc* oldFront = (docs.empty() ? nullptr : docs.front());
 
   Command* openCommand = Commands::instance()->byId(CommandId::OpenFile());
   Params params;
   params.set("filename", absFn.c_str());
-  if (param == LoadSpriteFromFileParam::OneFrameAsSprite ||
-      param == LoadSpriteFromFileParam::OneFrameAsImage)
+  if (param == LoadSpriteFromFileParam::OneFrameAsSprite || image)
     params.set("oneframe", "true");
-  ctx->executeCommand(openCommand, params);
+  {
+    kiosk::Allow allow;
+    ctx->executeCommand(openCommand, params);
+  }
 
-  Doc* newDoc = ctx->activeDocument();
+  // A new document goes to the front of the list, and becomes the
+  // active one only where it gets a view
+  Doc* newDoc = (!docs.empty() && docs.front() != oldFront ? docs.front() :
+                                                             ctx->activeDocument());
   if (newDoc != oldDoc) {
     if (param == LoadSpriteFromFileParam::OneFrameAsImage) {
       doc::Sprite* sprite = newDoc->sprite();
@@ -770,6 +785,22 @@ int App_get_forkApiVersion(lua_State* L)
   return 1;
 }
 
+int App_get_kiosk(lua_State* L)
+{
+  lua_pushboolean(L, kiosk::active());
+  return 1;
+}
+
+int App_set_kiosk(lua_State* L)
+{
+  // The kiosk lasts for the session
+  if (!lua_toboolean(L, 2))
+    return luaL_error(L, "the kiosk can't be left");
+  if (!kiosk::active())
+    kiosk::start();
+  return 0;
+}
+
 int App_get_tool(lua_State* L)
 {
   tools::Tool* tool = App::instance()->activeToolManager()->activeTool();
@@ -923,6 +954,7 @@ const Property App_properties[] = {
   { "version",        App_get_version,        nullptr                },
   { "apiVersion",     App_get_apiVersion,     nullptr                },
   { "forkApiVersion", App_get_forkApiVersion, nullptr                },
+  { "kiosk",          App_get_kiosk,          App_set_kiosk          },
   { "site",           App_get_site,           nullptr                },
   { "range",          App_get_range,          nullptr                },
   { "isUIAvailable",  App_get_isUIAvailable,  nullptr                },

@@ -19,6 +19,7 @@
 #include "app/crash/data_recovery.h"
 #include "app/doc.h"
 #include "app/ini_file.h"
+#include "app/kiosk.h"
 #include "app/modules/gfx.h"
 #include "app/modules/gui.h"
 #include "app/modules/palettes.h"
@@ -496,6 +497,10 @@ bool CustomizedGuiManager::onProcessMessage(Message* msg)
       break;
 
     case kDropFilesMessage:
+      // The kiosk takes no dropped files
+      if (kiosk::active())
+        break;
+
       // Files are processed only when the main window is the current
       // window running.
       //

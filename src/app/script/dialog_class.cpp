@@ -16,6 +16,7 @@
 #include "app/doc.h"
 #include "app/extensions.h"
 #include "app/file_selector.h"
+#include "app/kiosk.h"
 #include "app/script/canvas_widget.h"
 #include "app/script/docobj.h"
 #include "app/script/engine.h"
@@ -24,6 +25,7 @@
 #include "app/script/luacpp.h"
 #include "app/script/tabs_widget.h"
 #include "app/script/tree_widget.h"
+#include "app/script/trust.h"
 #include "app/script/workspace_tab.h"
 #include "app/ui/button_set.h"
 #include "app/ui/color_button.h"
@@ -417,6 +419,9 @@ int Dialog_new(lua_State* L)
     type = lua_getfield(L, 1, "tab");
     tab = (type != LUA_TNIL && lua_toboolean(L, -1));
     lua_pop(L, 1);
+    // In the kiosk only a script that comes with the app opens a tab
+    if (tab && kiosk::active() && !is_trusted_call(L))
+      return luaL_error(L, "the kiosk opens no tab for this script");
 
     type = lua_getfield(L, 1, "closable");
     closable = (type == LUA_TNIL || lua_toboolean(L, -1));

@@ -78,18 +78,47 @@ protected:
         docIds.push_back(docView->document()->id());
     }
 
+    // As the app quits, a modified document that shows nowhere gets a
+    // tab, so it is asked about too, and loses it again on a cancel
+    std::vector<doc::ObjectId> shown;
+    if (m_quitting) {
+      for (Doc* doc : ctx->documents()) {
+        if (doc->isModified() && ctx->getAllDocViews(doc).empty()) {
+          ctx->addDocView(doc);
+          docIds.push_back(doc->id());
+          shown.push_back(doc->id());
+        }
+      }
+    }
+
     for (doc::ObjectId id : docIds) {
       while (Doc* doc = doc::get<Doc>(id)) {
         const DocViews views = ctx->getAllDocViews(doc);
         if (views.empty())
           break;
-        if (!workspace->closeView(views.front(), m_quitting))
+        if (!workspace->closeView(views.front(), m_quitting)) {
+          hide(ctx, workspace, shown);
           return;
+        }
       }
     }
   }
 
 private:
+  static void hide(UIContext* ctx, Workspace* workspace, const std::vector<doc::ObjectId>& ids)
+  {
+    for (doc::ObjectId id : ids) {
+      if (Doc* doc = doc::get<Doc>(id)) {
+        for (DocView* view : ctx->getAllDocViews(doc)) {
+          if (!view->host()) {
+            workspace->removeView(view);
+            delete view;
+          }
+        }
+      }
+    }
+  }
+
   bool m_quitting;
 };
 

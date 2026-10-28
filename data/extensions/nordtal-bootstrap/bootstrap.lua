@@ -209,6 +209,7 @@ loadPlugin = function(dir, repo)
     show(function(d)
       d:label{ text=tr("pluginFailed") }
       addLines(d, { msg })
+      d:button{ text=tr("tryAgain"), onclick=function() loadPlugin(dir, repo) end }
       d:button{ text=tr("close") }
     end)
   end
@@ -359,6 +360,10 @@ function init(p)
   if not season.available then
     return
   end
+  -- The window shows only what the bootstrap and the season's plugin
+  -- put into it, and keeps no backups of sprites a draft already holds
+  app.kiosk = true
+  preferences.general.data_recovery = false
   plugin:newCommand{
     id="NordtalFolder",
     title=tr("changeFolder"),

@@ -12,6 +12,7 @@
 
 #include "app/app.h"
 #include "app/doc.h"
+#include "app/kiosk.h"
 #include "app/ui/doc_view.h"
 #include "app/ui/editor/editor.h"
 #include "app/ui/main_window.h"
@@ -81,12 +82,14 @@ void WorkspaceTab::closeTab()
   if (!isOpen())
     return;
 
-  // The embedded document goes back to a tab of its own
+  // The embedded document goes back to a tab of its own, or to none in
+  // the kiosk
   if (DocView* view = docView()) {
     Doc* doc = view->document();
     delete view;
     UIContext::instance()->setActiveView(nullptr);
-    UIContext::instance()->addDocView(doc);
+    if (!kiosk::active())
+      UIContext::instance()->addDocView(doc);
   }
   App::instance()->workspace()->removeView(this);
 }
@@ -155,12 +158,14 @@ void WorkspaceTab::updateDocView()
   bool created = false;
 
   if (m_slot && (old ? old->document() : nullptr) != doc) {
-    // The old document goes back to a tab of its own
+    // The old document goes back to a tab of its own, or to none in the
+    // kiosk
     if (old) {
       Doc* oldDoc = old->document();
       delete old;
       ctx->setActiveView(nullptr);
-      ctx->addDocView(oldDoc);
+      if (!kiosk::active())
+        ctx->addDocView(oldDoc);
     }
 
     // The new one leaves its tabs, or the tab that embeds it

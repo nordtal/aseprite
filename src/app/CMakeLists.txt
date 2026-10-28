@@ -569,6 +569,7 @@ target_sources(app-lib PRIVATE
   i18n/xml_translator.cpp
   ini_file.cpp
   job.cpp
+  kiosk.cpp
   launcher.cpp
   load_matrix.cpp
   log.cpp

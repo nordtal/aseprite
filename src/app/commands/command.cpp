@@ -13,6 +13,7 @@
 #include "app/commands/params.h"
 #include "app/console.h"
 #include "app/i18n/strings.h"
+#include "app/kiosk.h"
 
 namespace app {
 
@@ -36,6 +37,8 @@ void Command::loadParams(const Params& params)
 
 bool Command::isEnabled(Context* context)
 {
+  if (kiosk::refuses(this))
+    return false;
   try {
     return onEnabled(context);
   }

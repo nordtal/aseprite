@@ -15,6 +15,7 @@
 #include "app/context.h"
 #include "app/doc.h"
 #include "app/job.h"
+#include "app/kiosk.h"
 #include "app/ui/main_window.h"
 
 #ifdef ENABLE_SCRIPTING
@@ -50,6 +51,7 @@ void ExitCommand::onExecute(Context* ctx)
 #endif
 
   if (ctx->hasModifiedDocuments()) {
+    kiosk::Allow allow;
     Command* closeAll = Commands::instance()->byId(CommandId::CloseAllFiles());
     Params params;
     params.set("quitting", "1");
