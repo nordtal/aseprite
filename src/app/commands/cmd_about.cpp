@@ -43,6 +43,7 @@ bool AboutCommand::onEnabled(Context* context)
 void AboutCommand::onExecute(Context* context)
 {
   gen::About window;
+  window.setText(fmt::format("About {}", get_app_name()));
   window.title()->setText(fmt::format("{} v{}", get_app_name(), get_app_version()));
   window.licenses()->Click.connect([&window] {
     window.closeWindow(nullptr);
