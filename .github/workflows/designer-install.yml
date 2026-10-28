@@ -1,0 +1,58 @@
+name: designer-install
+# Runs the install line of the README on macOS and Windows, as a
+# designer pastes it, from the branch under test, and a second time as
+# the update. Nothing it builds leaves the runner: the EULA allows
+# compiling Aseprite only for one's own use.
+on:
+  pull_request:
+    paths:
+    - install.sh
+    - install.ps1
+    - misc/designer/**
+    - .github/workflows/designer-install.yml
+  workflow_dispatch:
+concurrency:
+  group: designer-install-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  RAW: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}
+  NORDTAL_DESIGNER_BRANCH: ${{ github.head_ref || github.ref_name }}
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+    - name: Install
+      run: curl -fsSL "$RAW/install.sh" | bash
+    - name: Check the app
+      run: |
+        app="/Applications/Nordtal Designer.app"
+        test -x "$app/Contents/MacOS/Nordtal Designer"
+        test -x "$app/Contents/Resources/data/extensions/nordtal-bootstrap/tools/gh/bin/gh"
+    - name: Update
+      run: curl -fsSL "$RAW/install.sh" | bash
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+    # The script reports a failed step in the exit code it leaves
+    - name: Install
+      shell: pwsh
+      run: |
+        irm "$env:RAW/install.ps1" | iex
+        exit $LASTEXITCODE
+    - name: Check the app
+      shell: pwsh
+      run: |
+        $app = Join-Path $env:LOCALAPPDATA 'Programs\Nordtal Designer'
+        if (-not (Test-Path "$app\Nordtal Designer.exe")) { throw 'no app' }
+        if (-not (Test-Path "$app\data\extensions\nordtal-bootstrap\tools\gh\bin\gh.exe")) { throw 'no gh' }
+        $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nordtal Designer.lnk'
+        if (-not (Test-Path $lnk)) { throw 'no start menu entry' }
+    - name: Update
+      shell: pwsh
+      run: |
+        irm "$env:RAW/install.ps1" | iex
+        exit $LASTEXITCODE

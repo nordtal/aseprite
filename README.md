@@ -3,21 +3,22 @@
 This repository builds Nordtal Designer, a copy of Aseprite with its own name, config directory
 and icon. It is installed beside the official Aseprite and registers no file types.
 
-A tag `v<aseprite version>-designer.<n>` builds unsigned packages for macOS arm64 and Windows x64
-and attaches them to its release.
+Each designer builds it from source with one line, since Aseprite's EULA allows compiling it only
+for one's own use and this repository publishes no build. The line installs what the build needs,
+fetches this repository, builds the app and installs it. Running it again updates the app.
 
-**macOS**: download `Nordtal-Designer-macOS-arm64.zip` from the newest release, then run
+**macOS**, in Terminal:
 
-    ditto -x -k ~/Downloads/Nordtal-Designer-macOS-arm64.zip /Applications && xattr -dr com.apple.quarantine "/Applications/Nordtal Designer.app"
+    curl -fsSL https://raw.githubusercontent.com/nordtal/aseprite/main/install.sh | bash
 
-**Windows**: download `Nordtal-Designer-Windows-x64.zip` from the newest release, unzip it and run
-`Nordtal Designer.exe`. SmartScreen warns about an unknown publisher: click *More info*, then
-*Run anyway*.
+**Windows**, in PowerShell:
 
-After the first install, the designer checks the releases at each start once it is signed in to
-GitHub, announces a newer one and installs it with one click. The new version replaces the app when
-the app quits and runs from the next start. On Windows that happens only for a folder that holds
-nothing but `Nordtal Designer.exe` and `data`, as the package unpacks it.
+    irm https://raw.githubusercontent.com/nordtal/aseprite/main/install.ps1 | iex
+
+The first run installs the Command Line Tools on macOS, which asks in a window of its own, and the
+Visual Studio Build Tools on Windows, which asks for administrator rights. An update builds only
+what changed. A step that fails says which one it was and leaves the installed app as it was. The
+app lands in `/Applications` on macOS and in the start menu on Windows.
 
 # Aseprite
 
