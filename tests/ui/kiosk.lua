@@ -16,6 +16,8 @@ ui_test(function()
   dlg:show{ wait=false }
 
   assert(app.kiosk == false)
+  app.kiosk = false
+  assert(app.kiosk == false)
   app.kiosk = true
   assert(app.kiosk == true)
   assert(not pcall(function() app.kiosk = false end))
@@ -43,7 +45,7 @@ ui_test(function()
   for _, id in ipairs{ "NewFile", "OpenFile", "ReopenClosedFile", "DuplicateSprite",
                        "DuplicateView", "NewSpriteFromSelection", "ImportSpriteSheet",
                        "CloseFile", "CloseAllFiles", "GotoNextTab", "GotoPreviousTab",
-                       "Home" } do
+                       "Home", "Screenshot" } do
     assert(app.command[id]() == false, id)
   end
   assert(app.command.SwitchColors() == true)

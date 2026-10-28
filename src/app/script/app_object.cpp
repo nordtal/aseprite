@@ -17,6 +17,8 @@
 #include "app/context_access.h"
 #include "app/doc.h"
 #include "app/doc_access.h"
+#include "app/docs.h"
+#include "app/docs_observer.h"
 #include "app/i18n/strings.h"
 #include "app/inline_command_execution.h"
 #include "app/kiosk.h"
@@ -55,11 +57,46 @@
 #include "ui/scale.h"
 #include "ver/info.h"
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <vector>
 
 namespace app { namespace script {
+
+namespace {
+
+// The document a command adds, preferably the one of the given file,
+// as long as it isn't removed again
+class AddedDoc : public DocsObserver {
+public:
+  AddedDoc(Docs& docs, const std::string& filename) : m_docs(docs), m_filename(filename)
+  {
+    m_docs.add_observer(this);
+  }
+  ~AddedDoc() { m_docs.remove_observer(this); }
+
+  Doc* doc() const
+  {
+    for (Doc* doc : m_added)
+      if (doc->filename() == m_filename)
+        return doc;
+    return (m_added.empty() ? nullptr : m_added.front());
+  }
+
+private:
+  void onAddDocument(Doc* doc) override { m_added.push_back(doc); }
+  void onRemoveDocument(Doc* doc) override
+  {
+    m_added.erase(std::remove(m_added.begin(), m_added.end(), doc), m_added.end());
+  }
+
+  Docs& m_docs;
+  std::string m_filename;
+  std::vector<Doc*> m_added;
+};
+
+} // anonymous namespace
 
 int load_sprite_from_file(lua_State* L, const char* filename, const LoadSpriteFromFileParam param)
 {
@@ -67,31 +104,31 @@ int load_sprite_from_file(lua_State* L, const char* filename, const LoadSpriteFr
   if (!ask_access(L, absFn.c_str(), FileAccessMode::Read, ResourceType::File))
     return luaL_error(L, "script doesn't have access to open file %s", absFn.c_str());
 
-  // In the kiosk only a script that comes with the app opens a sprite;
-  // an image is read by anyone
+  // In the kiosk only a script that comes with the app opens a sprite.
+  // Any script reads an image.
   const bool image = (param == LoadSpriteFromFileParam::OneFrameAsImage);
   if (kiosk::active() && !image && !is_trusted_call(L))
     return luaL_error(L, "the kiosk opens no sprite for this script");
 
   app::Context* ctx = App::instance()->context();
-  Docs& docs = ctx->documents();
   Doc* oldDoc = ctx->activeDocument();
-  Doc* oldFront = (docs.empty() ? nullptr : docs.front());
 
   Command* openCommand = Commands::instance()->byId(CommandId::OpenFile());
   Params params;
   params.set("filename", absFn.c_str());
   if (param == LoadSpriteFromFileParam::OneFrameAsSprite || image)
     params.set("oneframe", "true");
+  Doc* newDoc;
   {
-    kiosk::Allow allow;
+    // The new document becomes the active one only where it gets a
+    // view, and a file already open is only activated
+    AddedDoc added(ctx->documents(), absFn);
+    kiosk::Allow allow(CommandId::OpenFile());
     ctx->executeCommand(openCommand, params);
+    newDoc = added.doc();
   }
-
-  // A new document goes to the front of the list, and becomes the
-  // active one only where it gets a view
-  Doc* newDoc = (!docs.empty() && docs.front() != oldFront ? docs.front() :
-                                                             ctx->activeDocument());
+  if (!newDoc)
+    newDoc = ctx->activeDocument();
   if (newDoc != oldDoc) {
     if (param == LoadSpriteFromFileParam::OneFrameAsImage) {
       doc::Sprite* sprite = newDoc->sprite();
@@ -794,9 +831,10 @@ int App_get_kiosk(lua_State* L)
 int App_set_kiosk(lua_State* L)
 {
   // The kiosk lasts for the session
-  if (!lua_toboolean(L, 2))
+  const bool on = lua_toboolean(L, 2);
+  if (!on && kiosk::active())
     return luaL_error(L, "the kiosk can't be left");
-  if (!kiosk::active())
+  if (on && !kiosk::active())
     kiosk::start();
   return 0;
 }

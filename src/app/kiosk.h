@@ -14,8 +14,9 @@ class Command;
 // The kiosk: the window shows only what the scripts that come with the
 // app put into it. Once started it lasts for the session:
 // - The Home tab closes and never opens again.
-// - A document gets no tab of its own; it shows only where a tab
-//   dialog embeds it.
+// - A document gets no tab of its own. It shows only where a tab
+//   dialog embeds it, and in a tab that asks about its changes as the
+//   app quits.
 // - The window takes no drops of files, images or extensions, and the
 //   app opens no file the system hands it.
 // - Commands that open, create or close documents or tabs, or move
@@ -28,12 +29,12 @@ void start();
 // True when the command is disabled in the kiosk
 bool refuses(const Command* command);
 
-// While one lives, the kiosk lets its disabled commands run: a
+// While one lives, the kiosk lets the one disabled command run: a
 // trusted script opens a file, or the app closes every document as it
 // quits
 class Allow {
 public:
-  Allow();
+  explicit Allow(const char* commandId);
   ~Allow();
   Allow(const Allow&) = delete;
   Allow& operator=(const Allow&) = delete;

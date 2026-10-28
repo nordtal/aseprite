@@ -79,14 +79,18 @@ protected:
     }
 
     // As the app quits, a modified document that shows nowhere gets a
-    // tab, so it is asked about too, and loses it again on a cancel
+    // tab, so it is asked about too, and loses it again on a cancel. A
+    // new tab runs scripts, so the documents are collected first.
     std::vector<doc::ObjectId> shown;
     if (m_quitting) {
       for (Doc* doc : ctx->documents()) {
-        if (doc->isModified() && ctx->getAllDocViews(doc).empty()) {
-          ctx->addDocView(doc);
-          docIds.push_back(doc->id());
+        if (doc->isModified() && ctx->getAllDocViews(doc).empty())
           shown.push_back(doc->id());
+      }
+      for (doc::ObjectId id : shown) {
+        if (Doc* doc = doc::get<Doc>(id)) {
+          ctx->addDocView(doc);
+          docIds.push_back(id);
         }
       }
     }

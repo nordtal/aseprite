@@ -47,7 +47,7 @@
 //    commands that open, create or close documents or tabs are
 //    disabled. Only a trusted script then creates a sprite with
 //    Sprite(), opens one with app.open() or Sprite{ fromFile } and
-//    opens a Dialog{ tab=true }; any script still reads an image.
+//    opens a Dialog{ tab=true }. Any script still reads an image.
 #define FORK_API_VERSION 8
 
 #endif

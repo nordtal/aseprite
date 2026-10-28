@@ -51,7 +51,7 @@ void ExitCommand::onExecute(Context* ctx)
 #endif
 
   if (ctx->hasModifiedDocuments()) {
-    kiosk::Allow allow;
+    kiosk::Allow allow(CommandId::CloseAllFiles());
     Command* closeAll = Commands::instance()->byId(CommandId::CloseAllFiles());
     Params params;
     params.set("quitting", "1");
