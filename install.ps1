@@ -154,6 +154,8 @@
     Run $cmake -S $src -B $build -G Ninja `
       "-DCMAKE_MAKE_PROGRAM=$ninja" `
       -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+      -DENABLE_NEWS=off `
+      -DENABLE_UPDATER=off `
       -DENABLE_CCACHE=off `
       -DLAF_BACKEND=skia `
       "-DSKIA_DIR=$skia" `

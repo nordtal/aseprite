@@ -110,6 +110,8 @@ main() {
   "$cmake" -S "$src" -B "$build" -G Ninja \
     -DCMAKE_MAKE_PROGRAM="$ninja" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DENABLE_NEWS=off \
+    -DENABLE_UPDATER=off \
     -DCMAKE_OSX_ARCHITECTURES=$(uname -m) \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
     -DENABLE_CCACHE=off \
