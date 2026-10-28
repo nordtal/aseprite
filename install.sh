@@ -89,7 +89,7 @@ main() {
     git -C "$src" fetch --quiet origin "$branch"
     git -C "$src" checkout --quiet --force -B "$branch" FETCH_HEAD
     git -C "$src" submodule sync --quiet --recursive
-    git -C "$src" submodule update --quiet --init --recursive
+    git -C "$src" submodule update --quiet --init --recursive --force
   else
     rm -rf "$src"
     git clone --quiet --recursive --branch "$branch" "$repo" "$src"

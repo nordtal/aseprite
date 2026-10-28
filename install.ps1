@@ -88,8 +88,9 @@
       $other = if (Test-Path $vswhere) { & $vswhere -latest -products * -property installationPath }
       if ($other) {
         $setup = Start-Process -Verb RunAs -Wait -PassThru (Join-Path (Split-Path $vswhere) 'setup.exe') `
-          "modify --installPath `"$other`" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --norestart"
-        if ($setup.ExitCode -ne 0) { throw "the Visual Studio Installer exited with $($setup.ExitCode)" }
+          "modify --installPath `"$other`" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended --passive --norestart"
+        # 3010 is a success that asks for a restart
+        if ($setup.ExitCode -notin 0, 3010) { throw "the Visual Studio Installer exited with $($setup.ExitCode)" }
       } else {
         Winget Microsoft.VisualStudio.2022.BuildTools '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
       }
@@ -131,7 +132,7 @@
       Run git -C $src fetch --quiet origin $branch
       Run git -C $src checkout --quiet --force -B $branch FETCH_HEAD
       Run git -C $src submodule sync --quiet --recursive
-      Run git -C $src submodule update --quiet --init --recursive
+      Run git -C $src submodule update --quiet --init --recursive --force
     } else {
       Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $src
       Run git clone --quiet --recursive --branch $branch $repo $src
