@@ -69,8 +69,9 @@
     if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
       Winget Git.Git
     }
-    # The bash of Git for Windows, wherever the git.exe on the PATH lives
-    $gitRoot = (Run git.exe --exec-path) -replace '/mingw64/.*$', '' -replace '/', '\'
+    # The bash of Git for Windows, wherever the git.exe on the PATH lives:
+    # --exec-path is <root>/<mingw64, ucrt64, ...>/libexec/git-core
+    $gitRoot = (Run git.exe --exec-path) -replace '/[^/]+/libexec/git-core/?$', '' -replace '/', '\'
     $bash = Join-Path $gitRoot 'bin\bash.exe'
     if (-not (Test-Path $bash)) { throw "Git for Windows has no bash at $bash" }
 
