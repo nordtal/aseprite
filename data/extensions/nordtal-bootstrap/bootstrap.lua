@@ -351,6 +351,9 @@ function init(p)
   if not app.isUIAvailable then
     return
   end
+  -- A numbered file opens alone, without the question whether to open
+  -- its series as an animation
+  preferences.open_file.open_sequence = 2
   season = plugin:loadTrusted(joinPath(plugin.path, "season.lua"))()
   -- A build without the bundled tools runs without the bootstrap
   if not season.available then

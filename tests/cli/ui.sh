@@ -8,13 +8,14 @@
 # Scripts in ui/mirrored/ run the same way in a user folder of their
 # own, which starts with Aseprite's mirrored layout.
 
-# In the GUI a script asks before it runs a program, so the scripts in
-# the folder $1 get that access beforehand in the user folder $2
+# In the GUI a script asks before it runs a program, writes a file or
+# reads one, so the scripts in the folder $1 get that access beforehand
+# in the user folder $2: Execute | Write | Read of FileAccessMode
 function grant_ui_access() {
     {
         echo "[script_access]"
         for script in $1/*.lua ; do
-            echo "$(printf %s "$PWD/$script" | shasum | cut -c1-40) = 1"
+            echo "$(printf %s "$PWD/$script" | shasum | cut -c1-40) = 7"
         done
     } >>$2/aseprite.ini
 }
