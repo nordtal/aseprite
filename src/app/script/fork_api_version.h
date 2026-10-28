@@ -41,6 +41,13 @@
 //    before it go above a splitter that the user drags, the ones after
 //    it below. It starts at half the panel's height, and the panel
 //    keeps where the user dragged it, as it keeps its width.
-#define FORK_API_VERSION 7
+// 8: app.kiosk, false until a script sets it to true, which it stays
+//    for the session: the Home tab closes, a document shows only in a
+//    Dialog{ tab=true }, the window takes no dropped files, and the
+//    commands that open, create or close documents or tabs are
+//    disabled. Only a trusted script then creates a sprite with
+//    Sprite(), opens one with app.open() or Sprite{ fromFile } and
+//    opens a Dialog{ tab=true }. Any script still reads an image.
+#define FORK_API_VERSION 8
 
 #endif

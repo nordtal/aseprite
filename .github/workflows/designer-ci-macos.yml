@@ -36,6 +36,8 @@ jobs:
     - name: Configure
       run: |
         cmake -S . -B build -G Ninja \
+          -DENABLE_NEWS=off \
+          -DENABLE_UPDATER=off \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_OSX_ARCHITECTURES=arm64 \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \

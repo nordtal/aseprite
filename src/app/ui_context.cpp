@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/doc.h"
+#include "app/kiosk.h"
 #include "app/site.h"
 #include "app/ui/color_bar.h"
 #include "app/ui/doc_view.h"
@@ -308,6 +309,10 @@ void UIContext::onAddDocument(Doc* doc)
 
   // We don't create views in batch mode.
   if (!App::instance()->isGui())
+    return;
+
+  // Nor in the kiosk, where only a tab dialog shows a document
+  if (kiosk::active())
     return;
 
   addDocView(doc);

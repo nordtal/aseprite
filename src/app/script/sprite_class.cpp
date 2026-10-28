@@ -43,10 +43,12 @@
 #include "app/doc_undo.h"
 #include "app/doc_undo_observer.h"
 #include "app/file/palette_file.h"
+#include "app/kiosk.h"
 #include "app/script/docobj.h"
 #include "app/script/engine.h"
 #include "app/script/luacpp.h"
 #include "app/script/security.h"
+#include "app/script/trust.h"
 #include "app/script/userdata.h"
 #include "app/site.h"
 #include "app/transaction.h"
@@ -74,6 +76,10 @@ namespace {
 
 int Sprite_new(lua_State* L)
 {
+  // In the kiosk only a script that comes with the app makes a sprite
+  if (kiosk::active() && !is_trusted_call(L))
+    return luaL_error(L, "the kiosk makes no sprite for this script");
+
   std::unique_ptr<Doc> doc;
 
   // Duplicate a sprite

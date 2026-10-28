@@ -34,6 +34,8 @@ jobs:
     - name: Configure
       run: |
         cmake -S . -B build -G Ninja \
+          -DENABLE_NEWS=off \
+          -DENABLE_UPDATER=off \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DENABLE_CCACHE=on \
           -DENABLE_TESTS=on \
@@ -86,6 +88,8 @@ jobs:
     - name: Configure
       run: |
         cmake -S . -B build -G Ninja \
+          -DENABLE_NEWS=off \
+          -DENABLE_UPDATER=off \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
           -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
