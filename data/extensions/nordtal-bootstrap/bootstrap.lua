@@ -10,10 +10,10 @@
 -- methods, no tail calls.
 
 local app, Dialog, Process = app, Dialog, Process
-local find, format = string.find, string.format
+local byte, find, format, sub = string.byte, string.find, string.format, string.sub
 local concat, insert = table.concat, table.insert
 local max = math.max
-local pcall = pcall
+local pcall, tostring = pcall, tostring
 local getenv = os.getenv
 local fs = app.fs
 local joinPath, isDirectory, listFiles, makeAllDirectories, chooseFolder =
@@ -112,11 +112,28 @@ local function addQuit(d)
   d:button{ text=tr("quit"), onclick=function() command.Exit() end }
 end
 
+-- A line longer than this keeps only its end, where the reason
+-- usually is, so the status stays narrower than the window
+local maxLine = 80
+
+local function clip(line)
+  line = tostring(line)
+  if #line <= maxLine then
+    return line
+  end
+  local i = #line - maxLine + 1
+  -- Not inside a UTF-8 character
+  while i <= #line and byte(line, i) >= 0x80 and byte(line, i) < 0xC0 do
+    i = i + 1
+  end
+  return "..." .. sub(line, i)
+end
+
 -- A label for each of the last lines of what a tool printed
 local function addLines(d, lines)
   for i = max(1, #lines - 4), #lines do
     d:newrow()
-    d:label{ text=lines[i] }
+    d:label{ text=clip(lines[i]) }
   end
 end
 
@@ -130,7 +147,11 @@ local function failed(text, lines, retry)
   show(function(d)
     d:label{ text=text }
     addLines(d, lines)
-    d:button{ text=tr("tryAgain"), focus=true, onclick=retry }
+    -- Off while the step runs again, which replaces this status
+    d:button{ id="retry", text=tr("tryAgain"), focus=true, onclick=function()
+      d:modify{ id="retry", enabled=false }
+      retry()
+    end }
     addQuit(d)
   end)
 end
@@ -205,7 +226,7 @@ offerClone = function(repo, problem)
       end
       makeAllDirectories(root)
       status(tr("cloning", repo.name))
-      season.clone(season.url(repo), dir, function(ok, err)
+      local started, why = pcall(season.clone, season.url(repo), dir, function(ok, err)
         if ok then
           setUp(dir, repo)
           return
@@ -218,6 +239,10 @@ offerClone = function(repo, problem)
         insert(err, 1, tr("cloneFailed"))
         offerClone(repo, err)
       end)
+      -- A git that doesn't start leaves no status that waits for it
+      if not started then
+        offerClone(repo, { tr("cloneFailed"), tostring(why) })
+      end
     end }
     -- After a failed try, Clone tries again
     if problem then
@@ -229,7 +254,10 @@ end
 local function refuse(login)
   show(function(d)
     d:label{ text=tr("noAccess", login or "?") }
-    d:button{ text=tr("tryAgain"), focus=true, onclick=function() findSeason() end }
+    d:button{ text=tr("tryAgain"), focus=true, onclick=function()
+      status(tr("waiting"))
+      findSeason()
+    end }
     d:button{ text=tr("signOut"), onclick=function()
       season.signOut(function() signIn() end)
     end }
@@ -281,6 +309,7 @@ signIn = function()
         end,
         function(ok, err)
           if ok then
+            status(tr("waiting"))
             findSeason()
           elseif cancelled then
             signIn()
