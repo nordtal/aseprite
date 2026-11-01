@@ -568,6 +568,12 @@ protected:
       case kTimerMessage:
         closeWindow(nullptr);
         m_timer->stop();
+        // The tip's text leaves the status bar with the tip, unless
+        // something else was written there since
+        if (auto* statusBar = StatusBar::instance()) {
+          if (statusBar->m_timeout == statusBar->m_tipShown)
+            statusBar->showDefaultText();
+        }
         break;
     }
     return ui::TipWindow::onProcessMessage(msg);
@@ -823,6 +829,7 @@ void StatusBar::showTip(int msecs, const std::string& msg)
   // Set the text in status-bar (with inmediate timeout)
   IndicatorsGeneration(m_indicators).add(msg.c_str());
   m_timeout = base::current_tick();
+  m_tipShown = m_timeout;
 }
 
 void StatusBar::showColor(int msecs, const app::Color& color, const std::string& text)

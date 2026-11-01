@@ -100,6 +100,8 @@ private:
   void showIndicators();
 
   base::tick_t m_timeout;
+  // When the tip's text was written into the status bar
+  base::tick_t m_tipShown = 0;
 
   // About text
   class AboutStatusBar;
