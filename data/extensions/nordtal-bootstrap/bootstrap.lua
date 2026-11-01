@@ -16,9 +16,10 @@ local max = math.max
 local pcall = pcall
 local getenv = os.getenv
 local fs = app.fs
-local joinPath, isFile, isDirectory, listFiles, makeAllDirectories, chooseFolder =
-      fs.joinPath, fs.isFile, fs.isDirectory, fs.listFiles, fs.makeAllDirectories, fs.chooseFolder
+local joinPath, isDirectory, listFiles, makeAllDirectories, chooseFolder =
+      fs.joinPath, fs.isDirectory, fs.listFiles, fs.makeAllDirectories, fs.chooseFolder
 local clipboard = app.clipboard
+local command = app.command
 local windows = app.os.windows
 local preferences = app.preferences
 
@@ -35,7 +36,8 @@ local strings = {
     tryAgain = "Try Again",
     noAccess = "The GitHub account %s can't write to a season repository of nordtal. Ask for write access, or sign in with another account.",
     signOut = "Sign Out",
-    close = "Close",
+    cancel = "Cancel",
+    quit = "Quit",
     findFailed = "The season repositories could not be listed:",
     cloneText = "Clone nordtal/%s into this folder:",
     change = "Change...",
@@ -62,7 +64,8 @@ local strings = {
     tryAgain = "Erneut versuchen",
     noAccess = "Das GitHub-Konto %s darf in kein Saison-Repository von nordtal schreiben. Bitte um Schreibzugriff oder melde dich mit einem anderen Konto an.",
     signOut = "Abmelden",
-    close = "Schließen",
+    cancel = "Abbrechen",
+    quit = "Beenden",
     findFailed = "Die Saison-Repositorys konnten nicht gelistet werden:",
     cloneText = "nordtal/%s in diesen Ordner klonen:",
     change = "Ändern...",
@@ -95,14 +98,20 @@ local function cloneRoot()
   return plugin.preferences.cloneRoot or joinPath(home(), "Nordtal")
 end
 
--- One dialog at a time, replaced by each step
+-- One status at a time, replaced by each step. Without a title bar it
+-- has no close button and Esc doesn't close it, since the window has
+-- nothing else to show until the Nordtal tab opens.
 local function show(build, onclose)
   if dlg then
     dlg:close()
   end
-  dlg = Dialog{ title=tr("title"), onclose=onclose }
+  dlg = Dialog{ title=tr("title"), notitlebar=true, onclose=onclose }
   build(dlg)
   dlg:show{ wait=false }
+end
+
+local function addQuit(d)
+  d:button{ text=tr("quit"), onclick=function() command.Exit() end }
 end
 
 -- A label for each of the last lines of what a tool printed
@@ -111,6 +120,16 @@ local function addLines(d, lines)
     d:newrow()
     d:label{ text=lines[i] }
   end
+end
+
+-- A failed step: what failed, the last lines of why, Try again and Quit
+local function failed(text, lines, retry)
+  show(function(d)
+    d:label{ text=text }
+    addLines(d, lines)
+    d:button{ text=tr("tryAgain"), focus=true, onclick=retry }
+    addQuit(d)
+  end)
 end
 
 local function openUrl(url)
@@ -130,12 +149,7 @@ local function setUp(dir, repo)
       loadPlugin(dir, repo)
       return
     end
-    show(function(d)
-      d:label{ text=tr("javaFailed") }
-      addLines(d, err or {})
-      d:button{ text=tr("tryAgain"), onclick=function() setUp(dir, repo) end }
-      d:button{ text=tr("close") }
-    end)
+    failed(tr("javaFailed"), err or {}, function() setUp(dir, repo) end)
   end)
   if steps then
     show(function(d) d:label{ text=tr("java") } end)
@@ -150,14 +164,12 @@ loadPlugin = function(dir, repo)
     gh=season.gh,
     git=season.git,
     env=season.env() })
-  if not exitPlugin and isFile(joinPath(dir, "designer", "init.lua")) then
-    show(function(d)
-      d:label{ text=tr("pluginFailed") }
-      addLines(d, { msg })
-      d:button{ text=tr("tryAgain"), onclick=function() loadPlugin(dir, repo) end }
-      d:button{ text=tr("close") }
-    end)
+  if exitPlugin then
+    -- After Try again the failure is still open
+    if dlg then dlg:close() end
+    return
   end
+  failed(tr("pluginFailed"), { msg }, function() loadPlugin(dir, repo) end)
 end
 
 -- problem is a list of lines that tell why the last try failed
@@ -210,10 +222,10 @@ end
 local function refuse(login)
   show(function(d)
     d:label{ text=tr("noAccess", login or "?") }
-    d:button{ text=tr("signOut"), onclick=function()
+    d:button{ text=tr("signOut"), focus=true, onclick=function()
       season.signOut(function() signIn() end)
     end }
-    d:button{ text=tr("close") }
+    addQuit(d)
   end)
 end
 
@@ -224,12 +236,7 @@ findSeason = function()
       return
     end
     if err then
-      show(function(d)
-        d:label{ text=tr("findFailed") }
-        addLines(d, err)
-        d:button{ text=tr("tryAgain"), onclick=function() findSeason() end }
-        d:button{ text=tr("close") }
-      end)
+      failed(tr("findFailed"), err, function() findSeason() end)
       return
     end
     season.login(refuse)
@@ -253,7 +260,8 @@ signIn = function()
                        onclick=function() openUrl(season.deviceUrl) end }
             d2:newrow()
             d2:label{ text=tr("waiting") }
-            d2:button{ text=tr("close") }
+            -- Cancel goes back to the first step of the sign-in
+            d2:button{ text=tr("cancel") }
           end,
           -- Closing the dialog, however, ends the sign-in
           function()
@@ -269,16 +277,10 @@ signIn = function()
           elseif cancelled then
             signIn()
           else
-            show(function(d2)
-              d2:label{ text=tr("signInFailed") }
-              addLines(d2, err)
-              d2:button{ text=tr("tryAgain"), onclick=function() signIn() end }
-              d2:button{ text=tr("close") }
-            end)
+            failed(tr("signInFailed"), err, function() signIn() end)
           end
         end)
     end }
-    d:button{ text=tr("close") }
   end)
 end
 
