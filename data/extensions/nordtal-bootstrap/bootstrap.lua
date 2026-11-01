@@ -25,7 +25,6 @@ local preferences = app.preferences
 
 local strings = {
   en = {
-    title = "Nordtal Designer",
     signInText = "Sign in with a GitHub account that can write to a season repository of nordtal.",
     signIn = "Sign In with GitHub",
     codeText = "Enter this code on GitHub:",
@@ -53,7 +52,6 @@ local strings = {
     changeFolder = "Nordtal Folder...",
   },
   de = {
-    title = "Nordtal Designer",
     signInText = "Melde dich mit einem GitHub-Konto an, das in ein Saison-Repository von nordtal schreiben darf.",
     signIn = "Mit GitHub anmelden",
     codeText = "Gib diesen Code bei GitHub ein:",
@@ -105,7 +103,7 @@ local function show(build, onclose)
   if dlg then
     dlg:close()
   end
-  dlg = Dialog{ title=tr("title"), notitlebar=true, onclose=onclose }
+  dlg = Dialog{ notitlebar=true, onclose=onclose }
   build(dlg)
   dlg:show{ wait=false }
 end
@@ -120,6 +118,11 @@ local function addLines(d, lines)
     d:newrow()
     d:label{ text=lines[i] }
   end
+end
+
+-- A step that runs on its own
+local function status(text)
+  show(function(d) d:label{ text=text } end)
 end
 
 -- A failed step: what failed, the last lines of why, Try again and Quit
@@ -152,7 +155,7 @@ local function setUp(dir, repo)
     failed(tr("javaFailed"), err or {}, function() setUp(dir, repo) end)
   end)
   if steps then
-    show(function(d) d:label{ text=tr("java") } end)
+    status(tr("java"))
   end
 end
 
@@ -201,7 +204,7 @@ offerClone = function(repo, problem)
         return
       end
       makeAllDirectories(root)
-      show(function(d2) d2:label{ text=tr("cloning", repo.name) } end)
+      status(tr("cloning", repo.name))
       season.clone(season.url(repo), dir, function(ok, err)
         if ok then
           setUp(dir, repo)
@@ -216,13 +219,18 @@ offerClone = function(repo, problem)
         offerClone(repo, err)
       end)
     end }
+    -- After a failed try, Clone tries again
+    if problem then
+      addQuit(d)
+    end
   end)
 end
 
 local function refuse(login)
   show(function(d)
     d:label{ text=tr("noAccess", login or "?") }
-    d:button{ text=tr("signOut"), focus=true, onclick=function()
+    d:button{ text=tr("tryAgain"), focus=true, onclick=function() findSeason() end }
+    d:button{ text=tr("signOut"), onclick=function()
       season.signOut(function() signIn() end)
     end }
     addQuit(d)
@@ -248,7 +256,7 @@ signIn = function()
     d:label{ text=tr("signInText") }
     d:button{ text=tr("signIn"), focus=true, onclick=function()
       local login, cancelled
-      show(function(d2) d2:label{ id="status", text=tr("waiting") } end)
+      status(tr("waiting"))
       login = season.signIn(
         function(code)
           show(function(d2)
@@ -263,7 +271,7 @@ signIn = function()
             -- Cancel goes back to the first step of the sign-in
             d2:button{ text=tr("cancel") }
           end,
-          -- Closing the dialog, however, ends the sign-in
+          -- Cancel, or anything else that closes it, ends the sign-in
           function()
             if login.isRunning then
               cancelled = true
