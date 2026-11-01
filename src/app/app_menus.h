@@ -91,6 +91,7 @@ private:
   void updateMenusList();
   void createNativeMenus();
   void createNativeSubmenus(os::Menu* osMenu, const ui::Menu* uiMenu);
+  void syncNativeSubmenu(Menu* menu);
 
 #ifdef ENABLE_SCRIPTING
   void loadScriptsSubmenu(ui::Menu* menu, const std::string& dir, const bool rootLevel);
@@ -126,6 +127,9 @@ private:
   // Native main menu bar (== nullptr if the platform doesn't
   // support native menus)
   os::MenuRef m_osMenu;
+  // True while the recent files are listed again, which syncs the
+  // native menu once at the end
+  bool m_listingRecent = false;
   XmlTranslator m_xmlTranslator;
 
   static AppMenus* s_instance;

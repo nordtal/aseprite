@@ -530,6 +530,8 @@ bool AppMenus::rebuildRecentList()
   if (!owner || owner->hasSubmenuOpened())
     return false;
 
+  m_listingRecent = true;
+
   // Remove active items
   for (auto item : m_recentMenuItems)
     removeMenuItemFromGroup(item);
@@ -562,8 +564,20 @@ bool AppMenus::rebuildRecentList()
     addMenuItemIntoGroup(kFileRecentListGroup, std::move(menuitem));
   }
 
-  // Sync native menus
-  if (owner->native() && owner->native()->menuItem) {
+  m_listingRecent = false;
+  syncNativeSubmenu(menu);
+  return true;
+}
+
+// The native menu bar is a copy of the menus, so a menu whose items
+// change is copied again
+void AppMenus::syncNativeSubmenu(Menu* menu)
+{
+  if (m_listingRecent)
+    return;
+
+  auto owner = dynamic_cast<AppMenuItem*>(menu->getOwnerMenuItem());
+  if (owner && owner->native() && owner->native()->menuItem) {
     auto menus = os::System::instance()->menus();
     os::MenuRef osMenu = (menus ? menus->makeMenu() : nullptr);
     if (osMenu) {
@@ -571,8 +585,6 @@ bool AppMenus::rebuildRecentList()
       owner->native()->menuItem->setSubmenu(osMenu);
     }
   }
-
-  return true;
 }
 
 Menu* AppMenus::getAnimationMenu()
@@ -638,6 +650,7 @@ void AppMenus::addMenuItemIntoGroup(const std::string& groupId, std::unique_ptr<
   group.items.push_back(menuItem.get());
 
   menuItem.release();
+  syncNativeSubmenu(menu);
 }
 
 template<typename Pred>
@@ -652,6 +665,7 @@ void AppMenus::removeMenuItemFromGroup(Pred pred)
           group.end = group.end->previousSibling();
 
         destroy_menu_item(item);
+        syncNativeSubmenu(group.menu);
 
         it = group.items.erase(it);
       }
