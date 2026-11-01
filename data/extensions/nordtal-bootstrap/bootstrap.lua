@@ -11,7 +11,7 @@
 
 local app, Dialog, Process = app, Dialog, Process
 local byte, find, format, sub = string.byte, string.find, string.format, string.sub
-local concat, insert = table.concat, table.insert
+local concat = table.concat
 local max = math.max
 local pcall, tostring = pcall, tostring
 local getenv = os.getenv
@@ -196,8 +196,9 @@ loadPlugin = function(dir, repo)
   failed(tr("pluginFailed"), { msg }, function() loadPlugin(dir, repo) end)
 end
 
--- problem is a list of lines that tell why the last try failed
-offerClone = function(repo, problem)
+-- problem tells why the last try failed, and lines are what git
+-- printed, if anything
+offerClone = function(repo, problem, lines)
   local root = cloneRoot()
   local dir = joinPath(root, repo.name)
   if season.isClone(dir) then
@@ -217,11 +218,13 @@ offerClone = function(repo, problem)
       end
     end }
     if problem then
-      addLines(d, problem)
+      d:newrow()
+      d:label{ text=problem }
+      addLines(d, lines or {})
     end
     d:button{ id="clone", text=tr("clone"), focus=true, onclick=function()
       if isDirectory(dir) and #listFiles(dir) > 0 then
-        offerClone(repo, { tr("notAClone", dir) })
+        offerClone(repo, tr("notAClone", dir))
         return
       end
       makeAllDirectories(root)
@@ -233,15 +236,14 @@ offerClone = function(repo, problem)
         end
         local text = concat(err, "\n")
         if find(text, "xcrun", 1, true) or find(text, "developer path", 1, true) then
-          offerClone(repo, { tr("commandLineTools") })
+          offerClone(repo, tr("commandLineTools"))
           return
         end
-        insert(err, 1, tr("cloneFailed"))
-        offerClone(repo, err)
+        offerClone(repo, tr("cloneFailed"), err)
       end)
       -- A git that doesn't start leaves no status that waits for it
       if not started then
-        offerClone(repo, { tr("cloneFailed"), tostring(why) })
+        offerClone(repo, tr("cloneFailed"), { tostring(why) })
       end
     end }
     -- After a failed try, Clone tries again
