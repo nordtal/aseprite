@@ -15,10 +15,6 @@
 #include "app/commands/command_ids.h"
 #include "app/ui/home_view.h"
 #include "app/ui/workspace.h"
-#include "os/window.h"
-#include "ui/display.h"
-#include "ui/manager.h"
-#include "ui/message.h"
 
 #include <algorithm>
 #include <vector>
@@ -48,17 +44,6 @@ void start()
       workspace->removeView(view);
       break;
     }
-  }
-
-  // Queued after the manager's own message that sets the drag target,
-  // so it runs after it
-  if (ui::Manager* manager = ui::Manager::getDefault()) {
-    auto* msg = new ui::CallbackMessage([manager] {
-      if (os::Window* window = manager->display()->nativeWindow())
-        window->setDragTarget(nullptr);
-    });
-    msg->setRecipient(manager);
-    manager->enqueueMessage(msg);
   }
 }
 

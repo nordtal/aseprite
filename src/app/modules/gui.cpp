@@ -97,6 +97,11 @@ protected:
   void onNewDisplayConfiguration(Display* display) override;
   bool onEnqueueMouseDown(MouseMessage* mouseMsg) override;
 
+  // The kiosk refuses every drag, with the no-drop cursor
+  void dragEnter(os::DragEvent& ev) override;
+  void drag(os::DragEvent& ev) override;
+  void drop(os::DragEvent& ev) override;
+
   // LayoutIO implementation
   std::string loadLayout(Widget* widget) override;
   void saveLayout(Widget* widget, const std::string& str) override;
@@ -474,6 +479,32 @@ void defer_invalid_rect(const gfx::Rect& rc)
 
 //////////////////////////////////////////////////////////////////////
 // Manager event handler.
+
+void CustomizedGuiManager::dragEnter(os::DragEvent& ev)
+{
+  if (kiosk::active())
+    ev.dropResult(os::DropOperation::None);
+  else
+    ui::Manager::dragEnter(ev);
+}
+
+void CustomizedGuiManager::drag(os::DragEvent& ev)
+{
+  if (kiosk::active())
+    ev.dropResult(os::DropOperation::None);
+  else
+    ui::Manager::drag(ev);
+}
+
+void CustomizedGuiManager::drop(os::DragEvent& ev)
+{
+  if (kiosk::active()) {
+    ev.dropResult(os::DropOperation::None);
+    ev.acceptDrop(false);
+  }
+  else
+    ui::Manager::drop(ev);
+}
 
 bool CustomizedGuiManager::onProcessMessage(Message* msg)
 {

@@ -31,6 +31,15 @@ jobs:
         app="/Applications/Nordtal Designer.app"
         test -x "$app/Contents/MacOS/Nordtal Designer"
         test -x "$app/Contents/Resources/data/extensions/nordtal-bootstrap/tools/gh/bin/gh"
+    # The app still runs once the bootstrap has started, which shows its
+    # first status: a crash at start closes it without a word
+    - name: Start the app
+      run: |
+        "/Applications/Nordtal Designer.app/Contents/MacOS/Nordtal Designer" &
+        pid=$!
+        sleep 20
+        kill -0 $pid || { code=0; wait $pid || code=$?; echo "the app ended with $code at start"; exit 1; }
+        kill $pid
     - name: Update
       run: curl -fsSL "$RAW/install.sh" | bash
   windows:
@@ -51,6 +60,16 @@ jobs:
         if (-not (Test-Path "$app\data\extensions\nordtal-bootstrap\tools\gh\bin\gh.exe")) { throw 'no gh' }
         $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nordtal Designer.lnk'
         if (-not (Test-Path $lnk)) { throw 'no start menu entry' }
+    # The app still runs once the bootstrap has started, which shows its
+    # first status: a crash at start closes it without a word
+    - name: Start the app
+      shell: pwsh
+      run: |
+        $app = Join-Path $env:LOCALAPPDATA 'Programs\Nordtal Designer'
+        $p = Start-Process -PassThru -WorkingDirectory $app "$app\Nordtal Designer.exe"
+        Start-Sleep 20
+        if ($p.HasExited) { throw ('the app ended with 0x{0:X} at start' -f $p.ExitCode) }
+        Stop-Process -Force $p
     # fetch-tools.sh runs in Git for Windows' bash, which must bring
     # unzip and sha256sum itself, not find the runner's
     - name: Check Git's own tools
