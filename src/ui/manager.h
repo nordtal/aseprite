@@ -144,6 +144,16 @@ public:
 
 protected:
   bool onProcessMessage(Message* msg) override;
+
+  // os::DragTarget implementation. A subclass that refuses drags
+  // overrides these, so the window keeps its drag target: on Windows
+  // laf frees the drop target before it revokes it, so unsetting the
+  // drag target corrupts the heap.
+  void dragEnter(os::DragEvent& ev) override;
+  void dragLeave(os::DragEvent& ev) override;
+  void drag(os::DragEvent& ev) override;
+  void drop(os::DragEvent& ev) override;
+
   void onInvalidateRegion(const gfx::Region& region) override;
   void onResize(ResizeEvent& ev) override;
   void onSizeHint(SizeHintEvent& ev) override;
@@ -199,11 +209,6 @@ private:
 
   int pumpQueue();
   bool sendMessageToWidget(Message* msg, Widget* widget);
-
-  void dragEnter(os::DragEvent& ev) override;
-  void dragLeave(os::DragEvent& ev) override;
-  void drag(os::DragEvent& ev) override;
-  void drop(os::DragEvent& ev) override;
 
   static Widget* findLowestCommonAncestor(Widget* a, Widget* b);
   static bool someParentIsFocusStop(Widget* widget);
