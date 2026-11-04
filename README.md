@@ -9,11 +9,11 @@ fetches this repository, builds the app and installs it. Running it again update
 
 **macOS** with Apple silicon, in Terminal:
 
-    curl -fsSL https://raw.githubusercontent.com/nordtal/aseprite/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/nordtal/designer/main/install.sh | bash
 
 **Windows**, in PowerShell:
 
-    irm https://raw.githubusercontent.com/nordtal/aseprite/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/nordtal/designer/main/install.ps1 | iex
 
 The first run installs the Command Line Tools on macOS, which asks in a window of its own, and the
 Visual Studio Build Tools on Windows, which asks for administrator rights. An update builds only

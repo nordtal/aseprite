@@ -14,7 +14,7 @@ dry_run=
 [ "${1:-}" = "--dry-run" ] && dry_run=1
 
 upstream=https://github.com/aseprite/aseprite.git
-repo=${GH_REPO:-nordtal/aseprite}
+repo=${GH_REPO:-nordtal/designer}
 
 # Release tags only, no betas
 tag=$(git ls-remote --tags --refs "$upstream" 'v*' |

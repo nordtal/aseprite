@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs Nordtal Designer on macOS from source, or updates it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/nordtal/aseprite/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/nordtal/designer/main/install.sh | bash
 #
 # It installs what the build needs that is missing (the Command Line
 # Tools, CMake, Ninja and Skia), clones this repository or pulls it,
@@ -18,7 +18,7 @@ set -Eeuo pipefail
 # Everything runs from main on the last line, so a download cut short
 # runs nothing
 main() {
-  repo=https://github.com/nordtal/aseprite.git
+  repo=https://github.com/nordtal/designer.git
   home=${NORDTAL_DESIGNER_HOME:-$HOME/.nordtal-designer}
   branch=${NORDTAL_DESIGNER_BRANCH:-main}
   src=$home/source
