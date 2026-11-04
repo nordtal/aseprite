@@ -1,6 +1,6 @@
 # Installs Nordtal Designer on Windows from source, or updates it:
 #
-#   irm https://raw.githubusercontent.com/nordtal/aseprite/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/nordtal/designer/main/install.ps1 | iex
 #
 # It installs what the build needs that is missing (Git and the Visual
 # Studio Build Tools through winget, CMake, Ninja and Skia), clones this
@@ -20,7 +20,7 @@
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
 
-  $repo = 'https://github.com/nordtal/aseprite.git'
+  $repo = 'https://github.com/nordtal/designer.git'
   $root = if ($env:NORDTAL_DESIGNER_HOME) { $env:NORDTAL_DESIGNER_HOME } else { Join-Path $env:USERPROFILE '.nordtal-designer' }
   $branch = if ($env:NORDTAL_DESIGNER_BRANCH) { $env:NORDTAL_DESIGNER_BRANCH } else { 'main' }
   $src = Join-Path $root 'source'
