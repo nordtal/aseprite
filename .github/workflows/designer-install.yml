@@ -9,6 +9,9 @@ on:
     - install.sh
     - install.ps1
     - misc/designer/**
+    - src/**
+    - data/**
+    - laf
     - .github/workflows/designer-install.yml
   workflow_dispatch:
 concurrency:
