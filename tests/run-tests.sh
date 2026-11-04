@@ -64,7 +64,8 @@ fi
 # Runs a command and kills it after $limit seconds, so a hung script
 # fails the run instead of holding it; macOS has no timeout command.
 # The command runs in a process group of its own, so the kill also
-# ends whatever it started and waits on
+# ends whatever it started and waits on, and reads no terminal, which
+# would stop it in the background
 limit=${ASEPRITE_TEST_TIMEOUT:-300}
 function run_limited() {
     set -m
