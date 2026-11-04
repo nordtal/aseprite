@@ -62,17 +62,21 @@ if [[ "$filter" == "" ]] || [[ "console" =~ $filter ]]; then
 fi
 
 # Runs a command and kills it after $limit seconds, so a hung script
-# fails the run instead of holding it; macOS has no timeout command
+# fails the run instead of holding it; macOS has no timeout command.
+# The command runs in a process group of its own, so the kill also
+# ends whatever it started and waits on
 limit=${ASEPRITE_TEST_TIMEOUT:-300}
 function run_limited() {
-    "$@" &
+    set -m
+    "$@" </dev/null &
     local pid=$!
+    set +m
     ( for ((i = 0; i < limit; i++)); do
           sleep 1
           kill -0 $pid 2>/dev/null || exit 0
       done
       echo "killed after $limit s" >&2
-      kill -KILL $pid 2>/dev/null ) &
+      kill -KILL -- -$pid 2>/dev/null ) &
     local watchdog=$!
     wait $pid
     local status=$?
