@@ -26,17 +26,22 @@ end
 
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 
--- gh never sees a token of the environment, so the test runs with one
-if not os.getenv("GH_TOKEN") or not os.getenv("GITHUB_TOKEN") then
+-- gh never sees a token of the environment, so the test runs with one.
+-- Its git reads no global or system config: a signing program or a
+-- hook there could wait for input and hold the run forever
+if not os.getenv("GH_TOKEN") or not os.getenv("GITHUB_TOKEN") or
+   os.getenv("GIT_CONFIG_GLOBAL") ~= "/dev/null" then
   local script = debug.getinfo(1, "S").source:sub(2)
-  assert(os.execute("GH_TOKEN=from-env GITHUB_TOKEN=from-env " .. quote(app.fs.appPath) ..
-                    " -b --script " .. quote(script)))
+  assert(os.execute("GH_TOKEN=from-env GITHUB_TOKEN=from-env" ..
+                    " GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 " ..
+                    quote(app.fs.appPath) .. " -b --script " .. quote(script)))
   return
 end
 
 local source = app.fs.joinPath(app.fs.currentPath, "..", "data", "extensions",
                                "nordtal-bootstrap", "season.lua")
-local tmp = app.fs.joinPath(app.fs.tempPath, "nordtal-bootstrap-test")
+-- Inside the run's own user folder, so runs side by side do not share it
+local tmp = app.fs.joinPath(os.getenv("ASEPRITE_USER_FOLDER"), "nordtal-bootstrap-test")
 os.execute("rm -rf " .. quote(tmp))
 app.fs.makeAllDirectories(tmp)
 
