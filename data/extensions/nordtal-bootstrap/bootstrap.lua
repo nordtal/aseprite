@@ -209,7 +209,7 @@ offerClone = function(repo, problem, lines)
   show(function(d)
     d:label{ text=tr("cloneText", repo.name) }
     d:newrow()
-    d:label{ id="path", text=dir }
+    d:label{ id="path", text=clip(dir) }
     d:button{ text=tr("change"), onclick=function()
       local chosen = chooseFolder{ title=tr("chooseFolder"), path=root }
       if chosen then
@@ -224,7 +224,7 @@ offerClone = function(repo, problem, lines)
     end
     d:button{ id="clone", text=tr("clone"), focus=true, onclick=function()
       if isDirectory(dir) and #listFiles(dir) > 0 then
-        offerClone(repo, tr("notAClone", dir))
+        offerClone(repo, clip(tr("notAClone", dir)))
         return
       end
       makeAllDirectories(root)
